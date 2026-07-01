@@ -24,6 +24,7 @@ let xunleiPatch = "/webman/3rdparty/pan-xunlei-com/index.cgi/#/home"
 
 let autoReloadTimer = null
 let clipboardWatchTimer = null
+let clipboardWatchActive = false  // watchClipboard 是否已启动（用于在窗口可见/隐藏切换时控制轮询）
 let healthCheckTimer = null
 let pendingTaskUrl = null  // 协议链接唤醒后待处理的任务URL
 let lastHiddenAt = 0  // 窗口隐藏的时间戳，需要在模块级别定义以便addXunLeiTask访问
@@ -481,9 +482,9 @@ module.exports.create = async function create(iconPath) {
 
     win.on('hide', markHidden)
     win.on('blur', markHidden)
-    win.on('show', () => refreshIfStale('show'))
-    win.on('focus', () => refreshIfStale('focus'))
-    win.on('restore', () => refreshIfStale('restore'))
+    win.on('show', () => { refreshIfStale('show'); restartClipboardPolling('show') })
+    win.on('focus', () => { refreshIfStale('focus'); restartClipboardPolling('focus') })
+    win.on('restore', () => { refreshIfStale('restore'); restartClipboardPolling('restore') })
 
     autoReloadTimer = setInterval(() => {
         if (win && !win.isDestroyed()) {
@@ -1213,24 +1214,80 @@ async function checkNasLoginStatus(_url) {
 
 let oldTxt = ""
 
+// 判断窗口是否处于"可见/有焦点"状态（未最小化且可见）
+function isWindowVisibleActive() {
+    if (!win || win.isDestroyed()) return false
+    return win.isVisible() && !win.isMinimized()
+}
+
+// 根据窗口可见性与配置决定剪贴板轮询间隔
+// 返回 null 表示停止轮询，正整数表示轮询间隔（毫秒）
+function getClipboardPollInterval() {
+    if (!win || win.isDestroyed()) return null
+    // 窗口可见/有焦点：300ms 高频轮询
+    if (isWindowVisibleActive()) {
+        return 300
+    }
+    // 窗口最小化/完全不可见时
+    // 配置选中"点击链接后自动弹窗"：保持原轮询频率（1000ms），内存里有链接时自动弹窗
+    if (global.config && global.config.hasOwnProperty('regProtocol') && global.config.regProtocol === true) {
+        return 1000
+    }
+    // 配置未选中"点击链接后自动弹窗"：关闭轮询
+    return null
+}
+
+// 立即查询一次剪贴板
+function clipboardCheckOnce() {
+    if (!win || win.isDestroyed()) return
+    let _txt = clipboard.readText()
+    if (_txt != oldTxt) {
+        oldTxt = _txt
+        if (!checkURL(_txt)) {
+            _txt = ""
+            return
+        }
+        addXunLeiTask(_txt)
+    }
+}
+
+// 轮询单次 tick：查询一次并根据当前状态安排下一次
+function clipboardTick() {
+    clipboardWatchTimer = null
+    if (!clipboardWatchActive) return
+    clipboardCheckOnce()
+    const delay = getClipboardPollInterval()
+    if (delay === null) {
+        console.log('[CLIPBOARD] polling stopped (window hidden + auto-popup disabled)')
+        return
+    }
+    clipboardWatchTimer = setTimeout(clipboardTick, delay)
+}
+
+// 重启剪贴板轮询：立即查询一次，并按当前状态重新安排定时器
+// 用于窗口由最小化/隐藏 变为可见时立即查询，以及可见性变化时调整频率
+function restartClipboardPolling(reason) {
+    if (!clipboardWatchActive) return
+    if (clipboardWatchTimer) {
+        clearTimeout(clipboardWatchTimer)
+        clipboardWatchTimer = null
+    }
+    // 窗口变为可见时立即查询一次
+    clipboardCheckOnce()
+    const delay = getClipboardPollInterval()
+    if (delay === null) {
+        console.log('[CLIPBOARD] polling stopped on', reason, '(window hidden + auto-popup disabled)')
+        return
+    }
+    console.log('[CLIPBOARD] polling restarted on', reason, 'interval =', delay, 'ms')
+    clipboardWatchTimer = setTimeout(clipboardTick, delay)
+}
+
 function watchClipboard() {
     clipboard.clear()
-    clipboardWatchTimer = setInterval(() => {
-        let _txt = clipboard.readText()
-        if (_txt != oldTxt) {
-            oldTxt = _txt
-            // if (_txt.match(/magnet:\?xt=urn:[a-z0-9]+:[a-z0-9]{32}/i) !== null) {
-            //
-            // } else
-
-            if (!checkURL(_txt)) {
-                _txt = ""
-                return
-            }
-            addXunLeiTask(_txt)
-        }
-
-    }, 1000)
+    oldTxt = ""
+    clipboardWatchActive = true
+    restartClipboardPolling('start')
 }
 
 var isInXunleiApp = function () {
@@ -1424,10 +1481,11 @@ function cleanupTimers() {
         console.log('autoReloadTimer cleared')
     }
     if (clipboardWatchTimer) {
-        clearInterval(clipboardWatchTimer)
+        clearTimeout(clipboardWatchTimer)
         clipboardWatchTimer = null
         console.log('clipboardWatchTimer cleared')
     }
+    clipboardWatchActive = false
     if (healthCheckTimer) {
         clearInterval(healthCheckTimer)
         healthCheckTimer = null
