@@ -60,7 +60,15 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm ci
+        # --ignore-scripts 跳过原生模块的 install 脚本（extract-file-icon 等），
+        # 避免在 Windows 上因找不到 Visual Studio 而失败；
+        # 原生模块由后续 electron-rebuild 步骤统一编译。
+        run: npm ci --ignore-scripts
+
+      - name: Install ui2 dependencies
+        # ui2 是独立的子项目（有自己的 package.json），需要单独安装其 devDependencies
+        # 否则 vite 找不到，build:ui2 会失败
+        run: npm --prefix ui2 ci
 
       - name: Build settings page (ui2 -> assets)
         run: npm run build:ui2
