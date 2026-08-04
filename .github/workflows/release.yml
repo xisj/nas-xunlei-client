@@ -33,12 +33,12 @@ jobs:
             platform: win32
             arch: x64
             label: win64
-            icon: --icon=src/icon.ico
+            icon: --icon=src/icon-256.ico
           - os: windows-2022
             platform: win32
             arch: ia32
             label: win32
-            icon: --icon=src/icon.ico
+            icon: --icon=src/icon-256.ico
           - os: macos-latest
             platform: darwin
             arch: arm64

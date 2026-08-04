@@ -7,8 +7,8 @@
     "start": "electron .",
     "pc": "electron .",
     "build:ui2": "npm --prefix ui2 run build",
-    "pack:win64": "electron-packager . nas迅雷 --out ./dist --platform=win32 --arch=x64 --prune --asar.unpack=**/*.node --overwrite --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 --ignore=node_modules/.bin --icon=src/icon.ico",
-    "pack:win32": "electron-packager . nas迅雷 --out ./dist --platform=win32 --arch=ia32 --prune --asar.unpack=**/*.node --overwrite --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 --ignore=node_modules/.bin --icon=src/icon.ico",
+    "pack:win64": "electron-packager . nas迅雷 --out ./dist --platform=win32 --arch=x64 --prune --asar.unpack=**/*.node --overwrite --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 --ignore=node_modules/.bin --icon=src/icon-256.ico",
+    "pack:win32": "electron-packager . nas迅雷 --out ./dist --platform=win32 --arch=ia32 --prune --asar.unpack=**/*.node --overwrite --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 --ignore=node_modules/.bin --icon=src/icon-256.ico",
     "pack:macx64": "electron-packager . nas迅雷 --out ./dist --platform=darwin --arch=x64 --prune --asar.unpack=**/*.node --overwrite --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 --ignore=node_modules/.bin",
     "pack:macarm": "electron-packager . nas迅雷 --out ./dist --platform=darwin --arch=arm64 --prune --asar.unpack=**/*.node --overwrite --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 --ignore=node_modules/.bin",
     "dist:win64": "electron-builder --win --x64",
@@ -50,7 +50,7 @@
       "repo": "nas-xunlei-client"
     },
     "win": {
-      "icon": "src/icon.ico",
+      "icon": "src/icon-256.ico",
       "target": [
         {
           "target": "nsis",
