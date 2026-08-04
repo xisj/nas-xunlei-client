@@ -793,32 +793,75 @@ ipcMain.on('mainWindow-msg', (e, args) => {
 // 在共享目录中查找文件并打开其所在文件夹（选中该文件）
 function handleOpenFileFolder(fileName) {
     console.log('handleOpenFileFolder:', fileName)
+
+    // 情况1：未配置下载文件夹路径
     if (!global.config.sharedPath || global.config.sharedPath === '') {
         showOpenSharedPathFailMessageBox(20004)
         return
     }
+
     const sharedPath = global.config.sharedPath
-    
+
+    // 情况2：配置的下载文件夹路径不存在
+    if (!fs.existsSync(sharedPath)) {
+        showOpenFolderFailDialog(
+            '下载文件夹不存在',
+            '配置的下载文件夹路径不存在：\n\n' + sharedPath + '\n\n请检查设置中的共享文件夹路径是否正确。'
+        )
+        return
+    }
+
     // 没有文件名则直接打开共享目录
     if (!fileName) {
         shell.openPath(sharedPath).catch(e => console.log('open shared path err:', e))
         return
     }
-    
+
     // 在共享目录中查找匹配的文件/文件夹
     try {
         const target = findFileInDir(sharedPath, fileName, 3)
-        if (target) {
+        if (target && fs.existsSync(target)) {
             console.log('found target:', target)
-            shell.showItemInFolder(target)
+            // 如果是目录，直接打开该目录；如果是文件，打开其所在目录
+            const stat = fs.statSync(target)
+            if (stat.isDirectory()) {
+                shell.openPath(target).catch(e => console.log('open dir err:', e))
+            } else {
+                shell.openPath(path.dirname(target)).catch(e => console.log('open parent dir err:', e))
+            }
         } else {
-            console.log('file not found, opening shared dir instead')
-            shell.openPath(sharedPath).catch(e => console.log('open shared path err:', e))
+            // 情况3：下载文件夹存在，但文件未找到（可能已被删除或移动）
+            console.log('file not found:', fileName)
+            showOpenFolderFailDialog(
+                '文件不存在',
+                '未在下载文件夹中找到「' + fileName + '」，\n该文件可能已被删除或移动。\n\n下载文件夹：' + sharedPath
+            )
         }
     } catch (e) {
         console.log('handleOpenFileFolder error:', e)
-        shell.openPath(sharedPath).catch(_ => {})
+        showOpenFolderFailDialog('打开文件夹失败', e.message)
     }
+}
+
+// 显示打开文件夹失败的提示对话框
+function showOpenFolderFailDialog(title, message) {
+    if (!win || win.isDestroyed()) {
+        dialog.showMessageBox({
+            type: "warning",
+            title: title,
+            message: title,
+            detail: message,
+            buttons: ['确定']
+        })
+        return
+    }
+    dialog.showMessageBox(win, {
+        type: "warning",
+        title: title,
+        message: title,
+        detail: message,
+        buttons: ['确定']
+    })
 }
 
 // 在指定目录下递归查找文件名匹配的文件/文件夹（限制递归深度防止卡死）

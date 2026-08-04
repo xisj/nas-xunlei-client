@@ -102,6 +102,124 @@ window.onload = function () {
     }, 1000)
     watchDesktop()
     injectContextMenuHandler()
+    injectFolderIconHover()
+}
+
+// 任务项 hover 时将左侧图标替换为"打开的文件夹"图标，点击打开对应文件夹
+function injectFolderIconHover() {
+    if (window.__folderIconHoverInstalled) return
+    window.__folderIconHoverInstalled = true
+
+    // 打开的文件夹图标 SVG（蓝色系，与迅雷 UI 风格协调）
+    var FOLDER_OPEN_SVG = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        + '<path d="M2 6C2 4.89543 2.89543 4 4 4H9L11 6H20C21.1046 6 22 6.89543 22 8V11H2V6Z" fill="#409eff"/>'
+        + '<path d="M22 11H2V18C2 19.1046 2.89543 20 4 20H20C21.1046 20 22 19.1046 22 18V11Z" fill="#66b1ff"/>'
+        + '<path d="M22 11L19 8H2L5 11H22Z" fill="#a0cfff"/>'
+        + '</svg>'
+
+    // 判断任务项是否符合显示文件夹图标的条件
+    function isTaskQualified(item) {
+        var content = item.querySelector('.task-item__content')
+        if (!content) return false
+
+        // 下载中：进度 > 0，或处于"校验中"/"验证中"（此时进度条可能显示0%但文件已存在）
+        if (content.classList.contains('ing')) {
+            var progressInner = item.querySelector('.td-progress-bar__inner')
+            var width = progressInner ? (progressInner.style.width || '0%') : '0%'
+            var percent = parseInt(width.replace('%', ''), 10)
+            if (percent > 0) return true
+            // 校验中/验证中：文件已下载完成，应允许打开
+            var statusEl = item.querySelector('.task-item__status')
+            var statusText = statusEl ? statusEl.textContent.trim() : ''
+            if (statusText.indexOf('校验') >= 0 || statusText.indexOf('验证') >= 0) return true
+            return false
+        }
+
+        // 已完成：仅"下载完成"状态可打开（"文件不存在"/"已删除"等不可打开）
+        if (content.classList.contains('done')) {
+            // is-disabled class 标记文件不存在的任务
+            if (item.classList.contains('is-disabled')) return false
+            var statusEl = item.querySelector('.pan-list-item-status')
+            var statusText = statusEl ? statusEl.textContent.trim() : ''
+            // 只允许"下载完成"，排除"文件不存在"/"删除"等
+            if (statusText !== '下载完成') return false
+            return true
+        }
+
+        return false
+    }
+
+    // 从任务项提取文件名
+    function getTaskFileName(item) {
+        var nameEl = item.querySelector('.pan-list-item-name a, .pan-list-item-name')
+        return nameEl ? nameEl.textContent.trim() : null
+    }
+
+    // 为单个任务项绑定 hover 行为
+    function bindHoverBehavior(item) {
+        if (item.__folderHoverBound) return
+        item.__folderHoverBound = true
+
+        item.addEventListener('mouseenter', function() {
+            if (!isTaskQualified(item)) return
+            var iconContainer = item.querySelector('.task-item__icon')
+            if (!iconContainer) return
+            var originalImg = iconContainer.querySelector('img')
+            var folderIconEl = iconContainer.querySelector('.nas-folder-hover-icon')
+            // 隐藏原图标
+            if (originalImg) originalImg.style.display = 'none'
+            // 创建或显示文件夹图标
+            if (!folderIconEl) {
+                folderIconEl = document.createElement('div')
+                folderIconEl.className = 'nas-folder-hover-icon'
+                folderIconEl.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;cursor:pointer;'
+                folderIconEl.innerHTML = FOLDER_OPEN_SVG
+                // 点击文件夹图标打开对应文件夹
+                folderIconEl.addEventListener('click', function(e) {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    var fileName = getTaskFileName(item)
+                    ipcRenderer.send('mainWindow-msg', {
+                        action: 'open-file-folder',
+                        data: { fileName: fileName }
+                    })
+                })
+                iconContainer.appendChild(folderIconEl)
+            }
+            folderIconEl.style.display = 'flex'
+            // 鼠标变手型
+            item.style.cursor = 'pointer'
+        })
+
+        item.addEventListener('mouseleave', function() {
+            var iconContainer = item.querySelector('.task-item__icon')
+            if (!iconContainer) return
+            var originalImg = iconContainer.querySelector('img')
+            var folderIconEl = iconContainer.querySelector('.nas-folder-hover-icon')
+            // 恢复原图标
+            if (originalImg) originalImg.style.display = ''
+            if (folderIconEl) folderIconEl.style.display = 'none'
+            item.style.cursor = ''
+        })
+    }
+
+    // 扫描并绑定所有任务项（带防抖，避免 MutationObserver 频繁触发）
+    var scanTimer = null
+    function scanAndBind() {
+        if (scanTimer) clearTimeout(scanTimer)
+        scanTimer = setTimeout(function() {
+            var items = document.querySelectorAll('.task-item')
+            for (var i = 0; i < items.length; i++) {
+                bindHoverBehavior(items[i])
+            }
+        }, 100)
+    }
+
+    // MutationObserver 监听 DOM 变化（切换标签页/新任务/滚动都会重新渲染）
+    var observer = new MutationObserver(scanAndBind)
+    observer.observe(document.body, { childList: true, subtree: true })
+    scanAndBind()
+    console.log('[FOLDER HOVER] injection started')
 }
 
 // 在网页自定义的右键菜单上追加 "打开文件夹" 选项
