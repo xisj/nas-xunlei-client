@@ -1,0 +1,169 @@
+name: Release
+
+# 构建并发布 4 个桌面平台:
+#   win32 (ia32) / win64 (x64) / mac intel (darwin-x64) / mac arm (darwin-arm64)
+#
+# 触发方式:
+#   1) 推送形如 v0.1.0 的 tag（推荐，配合 docs/发布.sh 使用）
+#   2) 手动 workflow_dispatch，填要发布的 tag
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的版本 tag（例如 v0.2.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            label: win64
+            icon: --icon=src/icon.ico
+          - os: windows-latest
+            platform: win32
+            arch: ia32
+            label: win32
+            icon: --icon=src/icon.ico
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            label: mac-arm
+            icon: ""
+          - os: macos-latest
+            platform: darwin
+            arch: x64
+            label: mac-intel
+            icon: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build settings page (ui2 -> assets)
+        run: npm run build:ui2
+
+      - name: Rebuild native module for Electron (${{ matrix.arch }})
+        env:
+          npm_config_arch: ${{ matrix.arch }}
+        run: npx electron-rebuild -f -w node-window-manager -a ${{ matrix.arch }}
+
+      - name: Package with electron-packager
+        shell: bash
+        run: |
+          VERSION="${VERSION_TAG#v}"
+          ICON="${{ matrix.icon }}"
+          npx electron-packager . "nas迅雷" \
+            --platform=${{ matrix.platform }} \
+            --arch=${{ matrix.arch }} \
+            --out=dist \
+            --prune \
+            --asar.unpack=**/*.node \
+            --overwrite \
+            --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 \
+            --ignore=docs --ignore=.git --ignore=.github --ignore=dist \
+            --ignore=node_modules/.bin \
+            $ICON \
+            --app-version="$VERSION"
+          echo "--- packaged output ---"
+          ls -la dist/
+
+      - name: Create zip archive (Windows)
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        run: |
+          $VERSION = "${{ env.VERSION_TAG }}" -replace '^v',''
+          New-Item -ItemType Directory -Force -Path dist-zip | Out-Null
+          $dir = Get-ChildItem -Path dist | Where-Object { $_.Name -match "win32.*${{ matrix.arch }}" } | Select-Object -First 1
+          if (-not $dir) { Write-Error "packaged dir not found"; exit 1 }
+          Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist-zip/nas-xunlei-${{ matrix.label }}-$VERSION.zip" -Force
+          Get-ChildItem dist-zip
+
+      - name: Create zip archive (macOS)
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          VERSION="${VERSION_TAG#v}"
+          mkdir -p dist-zip
+          DIR=$(ls -d dist/nas* 2>/dev/null | head -1)
+          if [ -z "$DIR" ]; then echo "packaged dir not found"; exit 1; fi
+          echo "packaged dir: $DIR"
+          cd "$DIR" && zip -ry "../dist-zip/nas-xunlei-${{ matrix.label }}-$VERSION.zip" .
+          ls -la ../dist-zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: dist-zip/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Compute checksums
+        run: |
+          cd artifacts
+          sha256sum *.zip > CHECKSUMS.txt
+          cat CHECKSUMS.txt
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
+          body: |
+            ## nas-xunlei-client ${{ env.VERSION_TAG }}
+
+            自动构建的桌面客户端，支持平台:
+            - Windows 64 位 (`nas-xunlei-win64-*.zip`)
+            - Windows 32 位 (`nas-xunlei-win32-*.zip`)
+            - macOS Intel (`nas-xunlei-mac-intel-*.zip`)
+            - macOS Apple Silicon (`nas-xunlei-mac-arm-*.zip`)
+
+            ### 安装说明
+            - **Windows**: 解压后运行 `nas迅雷.exe`
+            - **macOS**: 解压后拖入"应用程序"，首次打开如提示无法验证开发者，
+              请右键点击应用 → 打开（或系统设置 → 隐私与安全性 → 仍要打开）
+
+            ### 校验
+            各文件的 SHA-256 见 `CHECKSUMS.txt`
+          files: artifacts/*
+          draft: false
+          prerelease: false
