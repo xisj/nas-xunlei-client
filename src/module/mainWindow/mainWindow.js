@@ -2,6 +2,7 @@ const {app, BrowserWindow, ipcMain, clipboard, session, dialog, shell} = require
 const path = require('path')
 const fs = require('fs')
 const url = require('url')
+const net = require('net')
 const func = require('../../common/func')
 require('../../common/global')
 let psl = require('psl');
@@ -368,6 +369,12 @@ module.exports.create = async function create(iconPath) {
                     createSpeedWindow()
                 }
             }, 2000)
+        } else if (win.webContents.getURL().indexOf('http://') === 0
+            || win.webContents.getURL().indexOf('https://') === 0) {
+            // NAS 登录页：自动勾选"保持登录"复选框
+            setTimeout(() => {
+                injectRememberLoginHook()
+            }, 500)
         }
     })
 
@@ -398,16 +405,16 @@ module.exports.create = async function create(iconPath) {
             console.log("nasURL is empty")
             return
         }
+        let _nasURL = global.config.nasURL
         if (global.config.nasURL.indexOf('http://') > -1) {
             _nasURL = global.config.nasURL.replace('http://', 'https://')
-        }
-        if (global.config.nasURL.toString().indexOf('https://') > -1) {
+        } else if (global.config.nasURL.toString().indexOf('https://') > -1) {
             _nasURL = global.config.nasURL.replace('https://', 'http://')
         }
         if (await checkNasLoginStatus(global.config.nasURL)
             && ((url === global.config.nasURL || url === global.config.nasURL + "/")
                 || (url === _nasURL || url === _nasURL + "/"))) {
-            _xunleiURL = getXunleiURL(global.config.nasURL)
+            const _xunleiURL = getXunleiURL(global.config.nasURL)
 
             win.webContents.stop()
             win.webContents.loadURL(_xunleiURL)
@@ -596,7 +603,7 @@ module.exports.hide = hide
 ipcMain.on('mainWindow-msg', (e, args) => {
     // console.log('mainWindow-msg', global.config, args)
     if (!args.hasOwnProperty('action')) {
-        event.reply('mainWindow-msg', global.lang.getMsg(2001, "show-err"))
+        e.reply('mainWindow-msg', global.lang.getMsg(2001, "show-err"))
         return
     }
     switch (args.action) {
@@ -678,27 +685,6 @@ ipcMain.on('mainWindow-msg', (e, args) => {
                 // 更新速度浮窗
                 updateSpeedWindow()
             }
-            break
-        case "sniff-api":
-            // 抓包：打印迅雷接口的 URL 和响应体，定位下载速度字段
-            if (args.data) {
-                const tag = args.data.hasSpeed ? '【疑似速度接口】' : ''
-                console.log(`===== [SNIFF ${args.data.label}]${tag} =====`)
-                console.log('URL :', args.data.url)
-                console.log('BODY:', args.data.body)
-                console.log('===== END SNIFF =====')
-            }
-            break
-        case "debug-menu-dom":
-            // 调试用：打印菜单 DOM 结构
-            console.log('===== 菜单 DOM 调试信息 =====')
-            if (args.data && args.data.info) {
-                args.data.info.forEach(item => {
-                    console.log(`[depth=${item.depth}] tag=${item.tag}, class="${item.class}", childCount=${item.childCount}`)
-                    console.log(`  HTML: ${item.outerHTMLSnippet}`)
-                })
-            }
-            console.log('===== END =====')
             break
     }
 })
@@ -973,6 +959,79 @@ function injectSpeedSniffer() {
     })
 }
 
+// 自动勾选 NAS 登录页的"保持登录"复选框
+// DSM 登录页为远程页面，结构随版本变化，因此注入脚本：
+//   1) 通过标签文本 / 常见 id/name 正向识别"保持登录"复选框（排除 OTP/记住此设备等干扰项）
+//   2) 勾选后派发 change 事件，确保页面框架内部状态同步（不能派发 click，合成 click 会再次切换勾选态）
+//   3) 用定时器持续尝试，兼容登录表单异步渲染的情况
+function injectRememberLoginHook() {
+    if (!win || win.isDestroyed()) return
+    const script = `
+        (function() {
+            if (window.__rememberLoginHookInstalled) { return; }
+            window.__rememberLoginHookInstalled = true;
+
+            var MATCH_TEXT = /保持登录|记住我的登录|记住登录状态|自动登录|remember me|keep me logged|keep me signed|stay logged|stay signed/i;
+            var MATCH_ID = /keep.?login|stay.?login|remember(_|-)?(me|login)?|rememberme|rememberlogin/i;
+            var EXCLUDE = /otp|device|token|trust|2fa|code/i;
+
+            function collectText(cb) {
+                var text = '';
+                var label = cb.closest ? cb.closest('label') : null;
+                if (label) text += ' ' + (label.textContent || '');
+                var wrap = cb.parentElement;
+                if (wrap && wrap !== label) text += ' ' + (wrap.textContent || '');
+                return text;
+            }
+
+            function findRememberCheckbox() {
+                var boxes = document.querySelectorAll('input[type="checkbox"]');
+                for (var i = 0; i < boxes.length; i++) {
+                    var cb = boxes[i];
+                    var idName = ((cb.id || '') + ' ' + (cb.name || '')).toLowerCase();
+                    var text = collectText(cb);
+                    // 按 id/name 命中
+                    if (MATCH_ID.test(idName) && !EXCLUDE.test(idName) && !EXCLUDE.test(text)) {
+                        return cb;
+                    }
+                    // 按标签文本命中
+                    if (MATCH_TEXT.test(text) && !EXCLUDE.test(text)) {
+                        return cb;
+                    }
+                }
+                return null;
+            }
+
+            function checkIt() {
+                var cb = findRememberCheckbox();
+                if (!cb) return false;
+                if (!cb.checked) {
+                    cb.checked = true;
+                    // 派发 change 事件让页面框架（Vue/React 等）同步状态。
+                    // 注意：不能派发 click，合成 click 会再次切换原生 checked 状态。
+                    try {
+                        cb.dispatchEvent(new Event('change', { bubbles: true }));
+                    } catch (e) {
+                        var evt = document.createEvent('Event');
+                        evt.initEvent('change', true, false);
+                        cb.dispatchEvent(evt);
+                    }
+                    console.log('[LOGIN] 已自动勾选"保持登录"复选框');
+                }
+                return true;
+            }
+
+            checkIt();
+            setInterval(checkIt, 1000);
+        })();
+    `
+    win.webContents.executeJavaScript(script).then(() => {
+        console.log('[LOGIN] remember-me hook injected')
+    }).catch(e => {
+        console.log('[LOGIN] remember-me hook injection failed:', e)
+    })
+}
+
 // 更新 tray tooltip，显示下载速度
 function updateTrayTooltip() {
     const trayModule = require('../../common/tray')
@@ -1179,8 +1238,25 @@ async function checkNasLoginStatus(_url) {
             return resolve(false)
         }
 
-        let parsed = psl.parse(_url)
-        win.webContents.session.cookies.get({domain: parsed.domain}).then(cookies => {
+        // 从 URL 中提取 hostname，再按注册域过滤 cookie。
+        // 注意：psl.parse 只接受裸域名，直接传完整 URL（含协议/端口）或 IP 会解析失败，
+        // 导致 domain 为空、cookies.get 返回全部 cookie，误判为已登录而跳过登录页。
+        let host = ''
+        try {
+            host = new URL(_url).hostname
+        } catch (e) {
+            console.log("checkNasLoginStatus:invalid url:", _url)
+            return resolve(false)
+        }
+        let domain = host
+        if (!net.isIP(host)) {
+            const parsed = psl.parse(host)
+            if (parsed && !parsed.error && parsed.domain) {
+                domain = parsed.domain
+            }
+        }
+
+        win.webContents.session.cookies.get({domain: domain}).then(cookies => {
             if (cookies.length > 0) {
                 cookies.forEach((v, k) => {
                     if (v.hasOwnProperty('name')) {
@@ -1205,7 +1281,8 @@ async function checkNasLoginStatus(_url) {
                 resolve(false)
             }
         }).catch(e => {
-            console.log("cannot get cookie:", parsed.domain)
+            console.log("cannot get cookie:", domain, e)
+            resolve(false)
         })
     })
 

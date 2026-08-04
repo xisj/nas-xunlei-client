@@ -1,2 +1,4 @@
 /node_modules/
 /.idea
+/ui2/node_modules/
+/src/config.json
