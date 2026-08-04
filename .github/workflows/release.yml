@@ -28,12 +28,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             platform: win32
             arch: x64
             label: win64
             icon: --icon=src/icon.ico
-          - os: windows-latest
+          - os: windows-2022
             platform: win32
             arch: ia32
             label: win32
@@ -118,8 +118,10 @@ jobs:
           DIR=$(ls -d dist/nas* 2>/dev/null | head -1)
           if [ -z "$DIR" ]; then echo "packaged dir not found"; exit 1; fi
           echo "packaged dir: $DIR"
-          cd "$DIR" && zip -ry "../dist-zip/nas-xunlei-${{ matrix.label }}-$VERSION.zip" .
-          ls -la ../dist-zip
+          # DIR 形如 dist/nas迅雷-darwin-arm64，cd 后 .. 指向 dist/，
+          # 所以输出路径要用 ../../dist-zip 回到项目根目录
+          cd "$DIR" && zip -ry "../../dist-zip/nas-xunlei-${{ matrix.label }}-$VERSION.zip" .
+          ls -la ../../dist-zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
