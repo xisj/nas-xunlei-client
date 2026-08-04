@@ -1,7 +1,8 @@
 name: Release
 
-# 构建并发布 4 个桌面平台:
-#   win32 (ia32) / win64 (x64) / mac intel (darwin-x64) / mac arm (darwin-arm64)
+# 构建并发布桌面客户端:
+#   - electron-packager: portable zip (4平台，兼容 v1.0.0 用户)
+#   - electron-builder:  installer (NSIS exe + DMG，用于自动更新)
 #
 # 触发方式:
 #   1) 推送形如 v0.1.0 的 tag（推荐，配合 docs/发布.sh 使用）
@@ -78,7 +79,8 @@ jobs:
           npm_config_arch: ${{ matrix.arch }}
         run: npx electron-rebuild -f -w node-window-manager -a ${{ matrix.arch }}
 
-      - name: Package with electron-packager
+      # ============ 1. Portable zip (electron-packager，兼容老用户) ============
+      - name: Package portable with electron-packager
         shell: bash
         run: |
           VERSION="${VERSION_TAG#v}"
@@ -92,13 +94,13 @@ jobs:
             --overwrite \
             --ignore=doc --ignore=shell --ignore=ui --ignore=ui2 \
             --ignore=docs --ignore=.git --ignore=.github --ignore=dist \
-            --ignore=node_modules/.bin \
+            --ignore=release --ignore=node_modules/.bin \
             $ICON \
             --app-version="$VERSION"
           echo "--- packaged output ---"
           ls -la dist/
 
-      - name: Create zip archive (Windows)
+      - name: Create portable zip archive (Windows)
         if: matrix.platform == 'win32'
         shell: pwsh
         run: |
@@ -109,7 +111,7 @@ jobs:
           Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist-zip/nas-xunlei-${{ matrix.label }}-$VERSION.zip" -Force
           Get-ChildItem dist-zip
 
-      - name: Create zip archive (macOS)
+      - name: Create portable zip archive (macOS)
         if: matrix.platform == 'darwin'
         shell: bash
         run: |
@@ -118,16 +120,57 @@ jobs:
           DIR=$(ls -d dist/nas* 2>/dev/null | head -1)
           if [ -z "$DIR" ]; then echo "packaged dir not found"; exit 1; fi
           echo "packaged dir: $DIR"
-          # DIR 形如 dist/nas迅雷-darwin-arm64，cd 后 .. 指向 dist/，
-          # 所以输出路径要用 ../../dist-zip 回到项目根目录
           cd "$DIR" && zip -ry "../../dist-zip/nas-xunlei-${{ matrix.label }}-$VERSION.zip" .
           ls -la ../../dist-zip
+
+      # ============ 2. Installer (electron-builder，用于自动更新) ============
+      - name: Build installer with electron-builder (Windows)
+        if: matrix.platform == 'win32'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${VERSION_TAG#v}"
+          # 修改 package.json 版本号
+          npx json -I -f package.json -e "this.version='${VERSION}'"
+          if [ "${{ matrix.arch }}" = "ia32" ]; then
+            npx electron-builder --win --ia32 --publish never
+          else
+            npx electron-builder --win --x64 --publish never
+          fi
+          echo "--- electron-builder output ---"
+          ls -la release/
+
+      - name: Build installer with electron-builder (macOS)
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${VERSION_TAG#v}"
+          npx json -I -f package.json -e "this.version='${VERSION}'"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            npx electron-builder --mac --arm64 --publish never
+          else
+            npx electron-builder --mac --x64 --publish never
+          fi
+          echo "--- electron-builder output ---"
+          ls -la release/
+
+      - name: Collect installer artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-zip
+          # 复制 electron-builder 产物（exe/dmg/zip/yml）到 dist-zip
+          find release -maxdepth 1 -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.yml" -o -name "*.blockmap" \) -exec cp {} dist-zip/ \;
+          echo "--- all artifacts ---"
+          ls -la dist-zip/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.label }}
-          path: dist-zip/*.zip
+          path: dist-zip/*
           if-no-files-found: error
 
   release:
@@ -150,7 +193,7 @@ jobs:
       - name: Compute checksums
         run: |
           cd artifacts
-          sha256sum *.zip > CHECKSUMS.txt
+          sha256sum *.zip *.exe *.dmg *.yml 2>/dev/null > CHECKSUMS.txt || true
           cat CHECKSUMS.txt
 
       - name: Create / update GitHub Release
@@ -161,16 +204,26 @@ jobs:
           body: |
             ## nas-xunlei-client ${{ env.VERSION_TAG }}
 
-            自动构建的桌面客户端，支持平台:
+            自动构建的桌面客户端。
+
+            ### 安装包（推荐新用户使用，支持自动更新）
+            - Windows 64 位安装包 (`nas迅雷-Setup-${{ env.VERSION_TAG }}-x64.exe`)
+            - Windows 32 位安装包 (`nas迅雷-Setup-${{ env.VERSION_TAG }}-ia32.exe`)
+            - macOS Intel (`nas迅雷-${{ env.VERSION_TAG }}-intel.dmg`)
+            - macOS Apple Silicon (`nas迅雷-${{ env.VERSION_TAG }}-arm64.dmg`)
+
+            ### 免安装版（兼容老用户）
             - Windows 64 位 (`nas-xunlei-win64-*.zip`)
             - Windows 32 位 (`nas-xunlei-win32-*.zip`)
             - macOS Intel (`nas-xunlei-mac-intel-*.zip`)
             - macOS Apple Silicon (`nas-xunlei-mac-arm-*.zip`)
 
             ### 安装说明
-            - **Windows**: 解压后运行 `nas迅雷.exe`
-            - **macOS**: 解压后拖入"应用程序"，首次打开如提示无法验证开发者，
+            - **Windows 安装包**: 下载 `.exe` 双击安装，后续版本可自动更新
+            - **Windows 免安装版**: 解压后运行 `nas迅雷.exe`
+            - **macOS**: 下载 `.dmg` 拖入"应用程序"，首次打开如提示无法验证开发者，
               请右键点击应用 → 打开（或系统设置 → 隐私与安全性 → 仍要打开）
+            - **macOS 自动更新**: 需要代码签名支持，目前请手动下载新版本
 
             ### 校验
             各文件的 SHA-256 见 `CHECKSUMS.txt`

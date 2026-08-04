@@ -46,6 +46,7 @@ app.innerHTML = `
 
         <div class="action-row">
           <button id="confirm-config" class="primary-button" type="button">保存配置</button>
+          <button id="check-update" class="secondary-button" type="button">检查更新</button>
         </div>
       </section>
     </main>
@@ -141,6 +142,16 @@ if (sharedPathInput) {
       data: {
         nasURL: document.getElementById('nas-url') ? document.getElementById('nas-url').value : ''
       }
+    })
+  })
+}
+
+// 绑定检查更新按钮
+const checkUpdateBtn = document.getElementById('check-update')
+if (checkUpdateBtn) {
+  checkUpdateBtn.addEventListener('click', () => {
+    ipcRenderer.send('mainWindow-msg', {
+      action: 'check-update'
     })
   })
 }

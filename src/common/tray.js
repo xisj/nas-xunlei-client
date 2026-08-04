@@ -39,6 +39,13 @@ app.whenReady().then(() => {
                 require('../module/mainWindow/mainWindow').show()
             }
         },
+        {
+            label: global.lang.getLang('menu', 'checkUpdate'),
+            role: '',
+            click: async () => {
+                require('./updater').checkForUpdates(true)
+            }
+        },
         isMac ?
             {label: global.lang.getLang('menu', 'quitApp'), role: 'close'} :
             {label: global.lang.getLang('menu', 'quitApp'), role: 'quit'}

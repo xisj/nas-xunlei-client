@@ -15,5 +15,6 @@
   "caution": "注意！",
   "areYouReallyWantQuit": "你真的要退出程序吗？",
   "goToConfig": "打开设置中心",
-  "cancel": "取消"
+  "cancel": "取消",
+  "checkUpdate": "检查更新"
 }

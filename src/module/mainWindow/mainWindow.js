@@ -733,6 +733,9 @@ ipcMain.on('mainWindow-msg', (e, args) => {
                 console.log('directories selected', r.filePaths)
             })
             break
+        case "check-update":
+            require('../../common/updater').checkForUpdates(true)
+            break
         case "open-shared-path":
             if (null != global.config.sharedPath && "" !== global.config.sharedPath) {
                 shell.openPath(global.config.sharedPath).then(r => {

@@ -59,6 +59,7 @@ if (!gotTheLock) {
     require('./common/menu')
     const tray = require('./common/tray')
     const mainWindow = require('./module/mainWindow/mainWindow')
+    const updater = require('./common/updater')
 
     app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
         console.log('second-instance commandLine:', commandLine)
@@ -93,6 +94,9 @@ if (!gotTheLock) {
 
     app.whenReady().then(() => {
         mainWindow.create("icon.ico")
+        // 初始化自动更新
+        updater.init()
+        updater.startAutoCheck()
         app.on('activate', () => {
             // 窗口被 hide() 后（例如最小化到托盘），点击任务栏图标会触发 activate。
             // 此时窗口仍存在但不可见，需要主动 show/focus，否则点击无反应。
@@ -145,6 +149,7 @@ if (!gotTheLock) {
 
         // 清理定时器
         try { mainWindow.cleanupTimers() } catch (err) { console.log('cleanupTimers error:', err) }
+        try { updater.stopAutoCheck() } catch (err) { console.log('stopAutoCheck error:', err) }
 
         // 销毁窗口和所有资源
         try { mainWindow.destroyWindow() } catch (err) { console.log('destroyWindow error:', err) }

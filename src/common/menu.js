@@ -100,6 +100,13 @@ const template = [
         label: global.lang.getLang('menu', 'aboutMe'),
         submenu: [
             {
+                label: global.lang.getLang('menu', 'checkUpdate'),
+                click: async () => {
+                    require('./updater').checkForUpdates(true)
+                }
+            },
+            {type: 'separator'},
+            {
                 label: global.lang.getLang('menu', 'homepage'),
                 click: async () => {
                     const {shell} = require('electron')

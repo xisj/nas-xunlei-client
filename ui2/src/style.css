@@ -201,6 +201,7 @@ button, input {
   margin-top: 24px;
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
 }
 
 .primary-button {
@@ -224,6 +225,30 @@ button, input {
 }
 
 .primary-button:active {
+  transform: translateY(0);
+}
+
+.secondary-button {
+  height: 52px;
+  min-width: 120px;
+  border: 1px solid rgba(47, 108, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--primary);
+  font-weight: 700;
+  letter-spacing: .02em;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+
+.secondary-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(47, 108, 255, 0.14);
+  filter: brightness(1.02);
+}
+
+.secondary-button:active {
   transform: translateY(0);
 }
 
