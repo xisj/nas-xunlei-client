@@ -8,7 +8,13 @@ let tray
 app.whenReady().then(() => {
 
     const appPath = app.isPackaged ? path.dirname(app.getPath('exe'))+"/resources/app.asar" : app.getAppPath();
-    tray = new Tray(appPath + "/src/icon.png")
+    // macOS 托盘图标需要小尺寸（22x22），且设为 template image 让系统自动适配深浅色
+    const trayIcon = isMac ? appPath + "/src/icon-tray.png" : appPath + "/src/icon.png"
+    const trayImage = nativeImage.createFromPath(trayIcon)
+    tray = new Tray(trayImage)
+    if (isMac) {
+        tray.setImage(trayImage.resize({ width: 22, height: 22 }))
+    }
 
     const contextMenu = Menu.buildFromTemplate([
         {
