@@ -34,6 +34,10 @@ let currentSpeed = null  // 当前下载速度（字符串格式，如 "38224KB/
 let speedWindow = null  // 速度浮窗
 let speedWindowTopmostTimer = null  // 速度窗口置顶状态检查定时器
 let hiddenForFullscreen = false  // 是否因检测到全屏应用而隐藏了速度窗口
+let speedInteractiveRects = []  // 浮窗内可交互区域（胶囊/任务列表）的矩形，用于透明区域点击穿透判断
+let speedWindowDragging = false  // 浮窗是否正在拖拽（拖拽期间禁止穿透，避免松手丢失）
+let speedClickThroughTimer = null  // 浮窗点击穿透轮询定时器
+let speedClickThroughActive = false  // 当前鼠标是否位于可交互区域（false 表示窗口处于穿透/忽略鼠标状态）
 
 // 检测前台窗口是否为全屏应用（全屏视频/全屏游戏等）
 // 原理：取前台活动窗口，若其矩形完全覆盖所在显示器的整个屏幕（含任务栏区域），
@@ -242,6 +246,7 @@ ipcMain.on('speed-window-drag-start', () => {
         const cursor = screen.getCursorScreenPoint()
         const [winX, winY] = speedWindow.getPosition()
         speedDragOffset = { x: winX - cursor.x, y: winY - cursor.y }
+        speedWindowDragging = true
     }
 })
 ipcMain.on('speed-window-drag-move', () => {
@@ -263,7 +268,53 @@ ipcMain.on('speed-window-drag-end', () => {
         console.log('[SPEED WINDOW] Drag end, saving position:', x, y)
         setConfig({ speedWindowPosition: { x, y } })
     }
+    speedWindowDragging = false
 })
+
+// 渲染进程上报浮窗内可交互区域的矩形（相对窗口客户区的坐标，DIP 单位）。
+// 用于实现透明区域点击穿透：鼠标位于这些区域之外时，让窗口忽略鼠标事件，
+// 点击可穿透到下方应用；位于区域内（胶囊/任务列表）时正常接收点击。
+ipcMain.on('speed-window-interactive-rect', (e, rects) => {
+    speedInteractiveRects = Array.isArray(rects) ? rects : []
+})
+
+// 轮询鼠标位置，动态切换浮窗的鼠标穿透状态。
+// 用轮询而非仅靠渲染进程 mousemove，是因为 Windows 上 setIgnoreMouseEvents 后
+// 页面收不到 mousemove，无法靠事件反向恢复；轮询对全平台可靠。
+function updateSpeedClickThrough() {
+    if (!speedWindow || speedWindow.isDestroyed()) return
+
+    if (speedWindowDragging) {
+        // 拖拽期间强制可交互，避免指针划过透明区域时松手事件被穿透吞掉
+        if (!speedClickThroughActive) {
+            speedClickThroughActive = true
+            speedWindow.setIgnoreMouseEvents(false)
+        }
+        return
+    }
+
+    const { screen } = require('electron')
+    const cursor = screen.getCursorScreenPoint()
+    const [winX, winY] = speedWindow.getPosition()
+    const [winW, winH] = speedWindow.getSize()
+
+    let interactive = false
+    if (cursor.x >= winX && cursor.x < winX + winW && cursor.y >= winY && cursor.y < winY + winH) {
+        for (const r of speedInteractiveRects) {
+            const rx = winX + r.x
+            const ry = winY + r.y
+            if (cursor.x >= rx && cursor.x < rx + r.width && cursor.y >= ry && cursor.y < ry + r.height) {
+                interactive = true
+                break
+            }
+        }
+    }
+
+    if (interactive !== speedClickThroughActive) {
+        speedClickThroughActive = interactive
+        speedWindow.setIgnoreMouseEvents(!interactive, { forward: true })
+    }
+}
 
 function getXunleiURL(_nasURL) {
     console.log("============================getXunleiURL", null != win, win.webContents.getURL())
@@ -334,12 +385,54 @@ module.exports.create = async function create(iconPath) {
     }
 
     win.webContents.on('context-menu', (e, params) => {
-        console.log('context-menu', "" !== clipboard.readText(), true === isInXunleiApp())
-        if ("" !== clipboard.readText() && true === isInXunleiApp()) {
-            addXunLeiTask(clipboard.readText())
-        } else {
-            console.log('context-menu: doCtrlV', clipboard.readText())
-            doCtrlV(params.x, params.y)
+        e.preventDefault()
+        const { Menu } = require('electron')
+        const clipText = clipboard.readText()
+
+        // 在输入框内右键：弹出原生菜单，提供粘贴/复制/剪切，保证弹层里的输入框可以粘贴
+        if (params.isEditable) {
+            const template = [
+                {
+                    label: '粘贴',
+                    enabled: clipText.length > 0,
+                    click: () => {
+                        if (!win || win.isDestroyed()) return
+                        // 先尝试原生 paste()，preload.js 已拦截 paste 事件防止迅雷前端 preventDefault
+                        win.webContents.paste()
+                        // 兜底：若 paste() 未生效（如焦点不在 textarea），直接设置当前焦点元素的值
+                        win.webContents.executeJavaScript(`
+                            (function(){
+                                var el = document.activeElement;
+                                if (el && el.tagName === 'TEXTAREA') {
+                                    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                                    nativeSetter.call(el, ${JSON.stringify(clipText)});
+                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            })()
+                        `).catch(() => {})
+                    }
+                },
+                { type: 'separator' },
+                {
+                    label: '复制',
+                    role: 'copy',
+                    enabled: !!(params.selectionText && params.selectionText.length > 0)
+                },
+                {
+                    label: '剪切',
+                    role: 'cut',
+                    enabled: !!(params.selectionText && params.selectionText.length > 0)
+                }
+            ]
+            Menu.buildFromTemplate(template).popup({ window: win })
+            return
+        }
+
+        // 非输入区域右键且剪贴板里是下载链接：自动添加任务
+        console.log('context-menu', clipText.length > 0, isInXunleiApp())
+        if ("" !== clipText && true === isInXunleiApp() && checkURL(clipText)) {
+            addXunLeiTask(clipText)
         }
     })
 
@@ -362,6 +455,11 @@ module.exports.create = async function create(iconPath) {
 
         // 在迅雷页面注入抓包脚本
         if (win.webContents.getURL().indexOf('pan-xunlei-com') > 0) {
+            // 确保剪贴板监听已启动（登录/导航到迅雷页面后即生效）
+            if (!clipboardWatchActive) {
+                console.log('[CLIPBOARD] starting watch on xunlei page load')
+                watchClipboard()
+            }
             setTimeout(() => {
                 injectSpeedSniffer()
                 // 根据配置决定是否创建速度浮窗
@@ -1169,6 +1267,13 @@ function createSpeedWindow() {
         }
     }, 1000)
 
+    // 点击穿透轮询：持续判断鼠标是否位于浮窗可交互区域，动态开关鼠标穿透
+    if (speedClickThroughTimer) {
+        clearInterval(speedClickThroughTimer)
+    }
+    speedClickThroughTimer = setInterval(updateSpeedClickThrough, 50)
+    speedClickThroughActive = true
+
     speedWindow.webContents.on('did-finish-load', () => {
         console.log('[SPEED WINDOW] HTML loaded successfully')
         // 自动打开开发者工具（调试窗口）
@@ -1181,6 +1286,10 @@ function createSpeedWindow() {
 
     speedWindow.on('closed', () => {
         console.log('[SPEED WINDOW] Closed')
+        if (speedClickThroughTimer) {
+            clearInterval(speedClickThroughTimer)
+            speedClickThroughTimer = null
+        }
         speedWindow = null
     })
 }
@@ -1199,6 +1308,12 @@ function destroySpeedWindow() {
         clearInterval(speedWindowTopmostTimer)
         speedWindowTopmostTimer = null
     }
+    if (speedClickThroughTimer) {
+        clearInterval(speedClickThroughTimer)
+        speedClickThroughTimer = null
+    }
+    speedWindowDragging = false
+    speedInteractiveRects = []
     if (speedWindow && !speedWindow.isDestroyed()) {
         speedWindow.destroy()
         speedWindow = null
@@ -1297,21 +1412,16 @@ function isWindowVisibleActive() {
     return win.isVisible() && !win.isMinimized()
 }
 
-// 根据窗口可见性与配置决定剪贴板轮询间隔
-// 返回 null 表示停止轮询，正整数表示轮询间隔（毫秒）
+// 根据窗口可见性决定剪贴板轮询间隔
+// 始终轮询：即使窗口最小化/隐藏（用户在浏览器里复制链接），也能自动弹出下载层
 function getClipboardPollInterval() {
     if (!win || win.isDestroyed()) return null
     // 窗口可见/有焦点：300ms 高频轮询
     if (isWindowVisibleActive()) {
         return 300
     }
-    // 窗口最小化/完全不可见时
-    // 配置选中"点击链接后自动弹窗"：保持原轮询频率（1000ms），内存里有链接时自动弹窗
-    if (global.config && global.config.hasOwnProperty('regProtocol') && global.config.regProtocol === true) {
-        return 1000
-    }
-    // 配置未选中"点击链接后自动弹窗"：关闭轮询
-    return null
+    // 窗口最小化/完全不可见：1000ms 低频轮询，内存里有链接时自动弹窗
+    return 1000
 }
 
 // 立即查询一次剪贴板
@@ -1335,7 +1445,7 @@ function clipboardTick() {
     clipboardCheckOnce()
     const delay = getClipboardPollInterval()
     if (delay === null) {
-        console.log('[CLIPBOARD] polling stopped (window hidden + auto-popup disabled)')
+        console.log('[CLIPBOARD] polling stopped (window destroyed)')
         return
     }
     clipboardWatchTimer = setTimeout(clipboardTick, delay)
@@ -1353,7 +1463,7 @@ function restartClipboardPolling(reason) {
     clipboardCheckOnce()
     const delay = getClipboardPollInterval()
     if (delay === null) {
-        console.log('[CLIPBOARD] polling stopped on', reason, '(window hidden + auto-popup disabled)')
+        console.log('[CLIPBOARD] polling stopped on', reason, '(window destroyed)')
         return
     }
     console.log('[CLIPBOARD] polling restarted on', reason, 'interval =', delay, 'ms')
@@ -1361,8 +1471,8 @@ function restartClipboardPolling(reason) {
 }
 
 function watchClipboard() {
-    clipboard.clear()
-    oldTxt = ""
+    // 以当前剪贴板内容作为基线，避免启动时误触发；不清空剪贴板，不破坏用户复制的内容
+    oldTxt = clipboard.readText()
     clipboardWatchActive = true
     restartClipboardPolling('start')
 }
@@ -1421,19 +1531,14 @@ var addXunLeiTask = function (_txt) {
         return
     }
 
-    // 如果页面可能冻结（后台过久），先刷新页面
-    if (lastHiddenAt > 0 && (Date.now() - lastHiddenAt) > STALE_THRESHOLD_MS) {
-        console.log('addXunLeiTask: page may be frozen, reloading first')
-        lastHiddenAt = 0  // 先清零，避免 show 事件再次触发 refreshIfStale 重复 reload
-        win.webContents.reload()
-        return
-    }
+    // 先判断是否需要刷新（后台过久页面可能冻结），记录结果
+    const wasStale = lastHiddenAt > 0 && (Date.now() - lastHiddenAt) > STALE_THRESHOLD_MS
+    // 先清除 lastHiddenAt，避免下面 win.show() 触发 refreshIfStale 重复 reload
+    lastHiddenAt = 0
 
-    // 清除待处理标志（防止重复执行）
-    pendingTaskUrl = null
-
-    // 确保窗口处于可见且聚焦状态，弹层依赖焦点状态
-    // 注意：main.js 的 second-instance 中已经处理了显示，这里只是兜底
+    // 先显示窗口并聚焦，解除后台节流（backgroundThrottling），
+    // 否则隐藏状态下 reload/executeJavaScript 可能被节流甚至挂起，
+    // 导致 did-finish-load 不触发、待处理任务永远无法恢复。
     try {
         if (!win.isVisible()) {
             console.log('addXunLeiTask: window not visible, showing')
@@ -1448,6 +1553,16 @@ var addXunLeiTask = function (_txt) {
         }
     } catch (_) {}
 
+    // 窗口已显示（页面已解除节流），此时刷新不会被后台节流阻塞
+    if (wasStale) {
+        console.log('addXunLeiTask: page may be frozen, reloading first')
+        win.webContents.reload()
+        return
+    }
+
+    // 清除待处理标志（防止重复执行）
+    pendingTaskUrl = null
+
     // 等待 .create__task 元素就绪后再点击，避免 Vue 还未渲染完
     console.log('Waiting for .create__task button...')
     waitForSelector('.create__task').then(() => {
@@ -1460,23 +1575,27 @@ var addXunLeiTask = function (_txt) {
         // 弹层中的输入框需要再等一下渲染
         return waitForSelector('.el-textarea__inner', 10000)
     }).then(() => {
-        console.log('.el-textarea__inner found, focusing...')
+        console.log('.el-textarea__inner found, setting value directly...')
+        // 直接通过原生 value setter 设置文本，并派发 input/change 事件触发 Vue 响应式更新。
+        // 不使用 clipboard.writeText + paste() 的原因：
+        //   1. 迅雷网页端可能监听 paste 事件并 preventDefault，导致粘贴无效
+        //   2. Vue/Element UI 可能拦截 value 属性，需要用原生 setter 绕过
+        //   3. 直接设值 + 派发事件更可靠，不依赖剪贴板状态和焦点
         return win.webContents.executeJavaScript(`
             (function(){
                 var el = document.querySelector('.el-textarea__inner');
                 if (!el) return false;
-                el.value = '';
                 el.focus();
+                // 使用原生 value setter 绕过 Vue/Element UI 对 value 属性的拦截
+                var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                nativeSetter.call(el, ${JSON.stringify(_txt)});
+                // 派发 input 事件触发 Vue v-model 更新和迅雷前端链接解析
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
                 return true;
             })()
         `)
     }).then(() => {
-        console.log('Input focused, pasting text...')
-        clipboard.writeText(_txt)
-        win.webContents.sendInputEvent({type: 'keyDown', keyCode: 'Ctrl'})
-        win.webContents.sendInputEvent({type: 'keyDown', keyCode: 'V', modifiers: ['control']})
-        win.webContents.sendInputEvent({type: 'keyUp', keyCode: 'V', modifiers: ['control']})
-        win.webContents.sendInputEvent({type: 'keyUp', keyCode: 'Ctrl'})
         console.log('addXunLeiTask completed successfully')
     }).catch(e => {
         console.log('addXunLeiTask failed:', e && e.message ? e.message : e)
@@ -1484,48 +1603,6 @@ var addXunLeiTask = function (_txt) {
 }
 
 module.exports.addXunLeiTask = addXunLeiTask
-
-function doCtrlV(x = 0, y = 0) {
-    if (0 !== x && 0 !== y) {
-        win.webContents.sendInputEvent({
-            type: 'mouseEnter',
-            x: x,
-            y: y
-        });
-        // win.webContents.sendInputEvent({
-        //     type: 'mouseDown',
-        //     x: x,
-        //     y: y
-        // });
-        // win.webContents.sendInputEvent({
-        //     type: 'mouseUp',
-        //     x: x,
-        //     y: y
-        // });
-
-    }
-    win.webContents.sendInputEvent({
-        type: 'keyDown',
-        keyCode: 'Ctrl'
-    });
-
-    win.webContents.sendInputEvent({
-        type: 'keyDown',
-        keyCode: 'V',
-        modifiers: ['control']
-    });
-
-    win.webContents.sendInputEvent({
-        type: 'keyUp',
-        keyCode: 'V',
-        modifiers: ['control']
-    });
-
-    win.webContents.sendInputEvent({
-        type: 'keyUp',
-        keyCode: 'Ctrl'
-    });
-}
 
 function checkURL(_url) {
     if (

@@ -107,9 +107,47 @@ window.onload = function () {
 // 在网页自定义的右键菜单上追加 "打开文件夹" 选项
 function injectContextMenuHandler() {
     // 捕获右键事件，从 e.target 向上提取文件名
+    // 同时：在输入框/文本域内右键时，阻止迅雷网页端的自定义右键菜单，
+    // 让 Electron webContents 的 context-menu 事件能正常弹出原生菜单（含"粘贴"）。
+    // 否则迅雷前端的 contextmenu handler 会 preventDefault 并显示自己的菜单（无粘贴项），
+    // 盖住原生菜单，导致用户无法在弹层输入框里右键粘贴链接。
     document.addEventListener('contextmenu', (e) => {
+        var t = e.target
+        if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) {
+            // 阻止迅雷前端的 contextmenu handler（stopPropagation 在捕获阶段可阻止冒泡阶段的监听器）
+            e.stopImmediatePropagation()
+            e.stopPropagation()
+            // 不调用 preventDefault：让 Chromium 默认菜单被 Electron 的 context-menu 事件接管
+        }
         lastContextFileName = extractFileNameFromTarget(e.target)
         console.log('contextmenu fileName captured:', lastContextFileName)
+    }, true)
+
+    // 确保在输入框/文本域内 cmd+v (mac) / ctrl+v (win) 能正常粘贴。
+    // 迅雷前端可能全局监听 keydown 并对快捷键 preventDefault，导致原生粘贴失效。
+    // 在捕获阶段拦截：若目标为可编辑元素，阻止事件继续传播到迅雷的 handler，
+    // 但不 preventDefault，让浏览器/Electron 的原生粘贴行为正常执行。
+    document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
+            var t = e.target
+            if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) {
+                e.stopImmediatePropagation()
+                e.stopPropagation()
+            }
+        }
+    }, true)
+
+    // 确保粘贴事件本身不被迅雷前端拦截。
+    // 迅雷前端可能监听 paste 事件并 preventDefault（例如做自定义粘贴处理），
+    // 导致 cmd+v 和 webContents.paste() 都无法将文本写入输入框。
+    // 在捕获阶段拦截：若目标为可编辑元素，阻止事件传播到迅雷的 handler，
+    // 不 preventDefault，让浏览器原生粘贴行为（插入剪贴板文本）正常执行。
+    document.addEventListener('paste', (e) => {
+        var t = e.target
+        if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) {
+            e.stopImmediatePropagation()
+            e.stopPropagation()
+        }
     }, true)
 
     // 使用 MutationObserver 监听菜单出现

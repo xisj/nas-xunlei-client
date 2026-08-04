@@ -523,6 +523,7 @@
                 } else {
                     containerEl.classList.remove('no-tasks')
                 }
+                sendInteractiveRects()
 
                 // 检测任务数量变化，播放动画
                 if (taskCount !== lastTaskCount) {
@@ -621,6 +622,19 @@
         const speedContainerEl = document.getElementById('container')
         let isTaskListVisible = false  // 任务列表是否正在显示
 
+        // 向主进程上报可交互区域的矩形（相对窗口客户区的 DIP 坐标）。
+        // 主进程据此把胶囊/任务列表之外的透明区域设为点击穿透。
+        function sendInteractiveRects() {
+            const rects = []
+            const cr = speedContainerEl.getBoundingClientRect()
+            rects.push({ x: cr.left, y: cr.top, width: cr.width, height: cr.height })
+            if (isTaskListVisible) {
+                const tr = taskListEl.getBoundingClientRect()
+                rects.push({ x: tr.left, y: tr.top, width: tr.width, height: tr.height })
+            }
+            ipcRenderer.send('speed-window-interactive-rect', rects)
+        }
+
         // 格式化文件大小
         function formatFileSize(bytes) {
             if (!bytes || bytes === '0') return '未知'
@@ -698,6 +712,7 @@
         // 初始化时按胶囊实际高度精确设置窗口高度，保证底部阴影完整显示
         window.addEventListener('DOMContentLoaded', () => {
             ipcRenderer.send('resize-speed-window', getCollapsedHeight())
+            sendInteractiveRects()
         })
 
         // 接收任务列表响应
@@ -710,6 +725,7 @@
             // 调整窗口高度（含底部阴影留白）
             const totalHeight = TOP_PAD + speedContainerEl.offsetHeight + TASK_MARGIN + taskListEl.offsetHeight + BOTTOM_PAD
             ipcRenderer.send('resize-speed-window', totalHeight)
+            sendInteractiveRects()
         })
 
         // 鼠标离开隐藏任务列表
@@ -718,6 +734,7 @@
             isTaskListVisible = false
             // 恢复窗口高度
             ipcRenderer.send('resize-speed-window', getCollapsedHeight())
+            sendInteractiveRects()
         })
 
         // 点击任务列表也唤起主窗口
@@ -731,6 +748,8 @@
             console.log('window blurred, hiding task list')
             const tl = document.getElementById('task-list')
             tl.classList.remove('show')
+            isTaskListVisible = false
+            sendInteractiveRects()
         })
 
         // 右键菜单：发送 IPC 到主进程，使用 Electron 原生 Menu

@@ -50,6 +50,20 @@ const template = [
         ]
     },
 
+    // { role: 'editMenu' }
+    // macOS 上网页内的复制/粘贴/剪切快捷键依赖应用菜单中的 Edit 项注册，缺失会导致 Cmd+C/V/X 不生效
+    {
+        label: 'Edit',
+        submenu: [
+            { role: 'undo', label: '撤销' },
+            { role: 'redo', label: '重做' },
+            { type: 'separator' },
+            { role: 'cut', label: '剪切' },
+            { role: 'copy', label: '复制' },
+            { role: 'paste', label: '粘贴' },
+            { role: 'selectAll', label: '全选' }
+        ]
+    },
     // { role: 'viewMenu' }
     {
         label: 'View',
