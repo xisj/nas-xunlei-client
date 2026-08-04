@@ -4,10 +4,15 @@
 下载地址： https://github.com/xisj/nas-xunlei-client/releases
 
 ## 功能
-1. 打开 nas 下载文件夹
+1. 打开 nas 下载文件夹 ， 可以直接打开下载任务的文件夹
 2. 速度球查看下载进度
 3. 绑定下载协议，点击后自动激活迅雷下载
 4. 退出程序后彻底退出
+
+
+
+<img width="1098" height="722" alt="Kapture" src="https://github.com/user-attachments/assets/3b9917a7-e0d2-46a2-8c4b-cad468534455" />
+
 
 
 <img width="638" height="197" alt="image" src="https://github.com/user-attachments/assets/4437ac19-d372-421a-bbb6-4334d8116686" />
