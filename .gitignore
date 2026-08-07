@@ -2,3 +2,5 @@
 /.idea
 /ui2/node_modules/
 /src/config.json
+/release/
+/dist/
