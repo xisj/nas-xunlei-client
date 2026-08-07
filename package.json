@@ -86,7 +86,21 @@
             "arm64"
           ]
         }
-      ]
+      ],
+      "extendInfo": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "nas迅雷协议",
+            "CFBundleURLSchemes": [
+              "magnet",
+              "ed2k",
+              "thunder",
+              "thunderx",
+              "ftp"
+            ]
+          }
+        ]
+      }
     },
     "dmg": {
       "title": "${productName} ${version}",

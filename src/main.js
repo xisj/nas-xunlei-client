@@ -61,6 +61,65 @@ if (!gotTheLock) {
     const mainWindow = require('./module/mainWindow/mainWindow')
     const updater = require('./common/updater')
 
+    // ============ macOS open-url 事件处理 ============
+    // macOS 通过 URL scheme 唤起应用时触发 open-url 事件（而非 second-instance）。
+    // 该事件可能在 whenReady 之前触发（应用未启动时点击链接），因此必须尽早注册。
+    // Windows 不触发此事件，监听也无副作用。
+    let pendingOpenUrls = []   // ready 之前缓存的协议 URL
+    let isReady = false
+
+    // 验证是否为受支持的协议链接
+    function isValidProtocolUrl(url) {
+        if (!url || typeof url !== 'string') return false
+        return (
+            url.startsWith('magnet:') ||
+            url.startsWith('ed2k://') ||
+            url.startsWith('thunder://') ||
+            url.startsWith('thunderx://') ||
+            url.startsWith('ftp://')
+        )
+    }
+
+    // 处理协议链接：确保窗口可见并触发添加任务
+    function handleProtocolUrl(url) {
+        if (!isValidProtocolUrl(url)) {
+            console.log('open-url: not a valid protocol url, ignoring:', url)
+            return
+        }
+        console.log('Handling protocol URL:', url)
+        // 确保窗口可见、再触发任务，避免显示/隐藏闪烁
+        if (mainWindow.win) {
+            try {
+                if (!mainWindow.win.isVisible()) {
+                    console.log('open-url: window not visible, showing...')
+                    mainWindow.win.show()
+                }
+                if (mainWindow.win.isMinimized()) {
+                    console.log('open-url: window minimized, restoring...')
+                    mainWindow.win.restore()
+                }
+                mainWindow.win.focus()
+            } catch (e) {
+                console.log('open-url: error showing window:', e)
+            }
+        }
+        mainWindow.addXunLeiTask(url)
+    }
+
+    app.on('open-url', (event, url) => {
+        // 必须 preventDefault，否则 Electron 可能尝试默认处理
+        event.preventDefault()
+        console.log('open-url received:', url, 'isReady:', isReady)
+        if (!url) return
+        if (!isReady) {
+            // 应用尚未就绪（未启动时点击链接），缓存 URL 等 ready 后处理
+            pendingOpenUrls.push(url)
+        } else {
+            // 已就绪（已运行实例被唤起），直接处理
+            handleProtocolUrl(url)
+        }
+    })
+
     app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
         console.log('second-instance commandLine:', commandLine)
 
@@ -118,7 +177,21 @@ if (!gotTheLock) {
             func.registerProtocolClient()
         }
 
-        // 检查启动参数，处理通过协议链接启动的情况（程序关闭后点击链接）
+        // 标记已就绪：此后收到的 open-url 事件会直接处理
+        isReady = true
+
+        // macOS: 处理应用未启动时点击链接缓存的 open-url（可能在 ready 之前触发）
+        if (pendingOpenUrls.length > 0) {
+            console.log('Processing pending open-url(s):', pendingOpenUrls.length)
+            // 延迟执行，确保窗口和页面已初始化（与 Windows argv 处理保持一致）
+            setTimeout(() => {
+                pendingOpenUrls.forEach(url => handleProtocolUrl(url))
+                pendingOpenUrls = []
+            }, 3000)
+        }
+
+        // Windows: 检查启动参数，处理通过协议链接启动的情况（程序关闭后点击链接）
+        // macOS 的协议 URL 不在 argv 中，而是通过 open-url 事件传递（见上方处理）
         console.log('Process argv:', process.argv)
         const protocolUrl = extractProtocolUrl(process.argv)
         if (protocolUrl) {
