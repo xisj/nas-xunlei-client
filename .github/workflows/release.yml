@@ -161,8 +161,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-zip
-          # 复制 electron-builder 产物（exe/dmg/zip/yml）到 dist-zip
-          find release -maxdepth 1 -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.yml" -o -name "*.blockmap" \) -exec cp {} dist-zip/ \;
+          # 复制 electron-builder 产物到 dist-zip
+          # 不收集 builder-debug.yml（纯调试信息，用户和 updater 都不需要）
+          # 不收集 *.blockmap（updater 缺失时自动回退全量下载，保持 Release 列表整洁）
+          find release -maxdepth 1 -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "latest*.yml" \) -exec cp {} dist-zip/ \;
           echo "--- all artifacts ---"
           ls -la dist-zip/
 
@@ -193,8 +195,8 @@ jobs:
       - name: Compute checksums
         run: |
           cd artifacts
-          sha256sum *.zip *.exe *.dmg *.yml 2>/dev/null > CHECKSUMS.txt || true
-          cat CHECKSUMS.txt
+          sha256sum *.zip *.exe *.dmg *.yml 2>/dev/null > nas-xunlei-CHECKSUMS.txt || true
+          cat nas-xunlei-CHECKSUMS.txt
 
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -226,14 +228,12 @@ jobs:
             - **macOS 自动更新**: 需要代码签名支持，目前请手动下载新版本
 
             ### 校验
-            各文件的 SHA-256 见 `CHECKSUMS.txt`
+            各文件的 SHA-256 见 `nas-xunlei-CHECKSUMS.txt`
           files: |
+            artifacts/latest*.yml
+            artifacts/nas-xunlei-CHECKSUMS.txt
             artifacts/*.dmg
             artifacts/*.exe
             artifacts/*.zip
-            artifacts/latest*.yml
-            artifacts/builder-debug.yml
-            artifacts/CHECKSUMS.txt
-            artifacts/*.blockmap
           draft: false
           prerelease: false
