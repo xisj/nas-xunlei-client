@@ -1,4 +1,4 @@
-const {app, BrowserWindow, ipcMain, clipboard, session, dialog, shell} = require('electron')
+const {app, BrowserWindow, ipcMain, clipboard, session, dialog, shell, powerMonitor} = require('electron')
 const path = require('path')
 const fs = require('fs')
 const url = require('url')
@@ -42,11 +42,28 @@ let speedClickThroughActive = false  // 当前鼠标是否位于可交互区域�
 // 检测前台窗口是否为全屏应用（全屏视频/全屏游戏等）
 // 原理：取前台活动窗口，若其矩形完全覆盖所在显示器的整个屏幕（含任务栏区域），
 // 则视为全屏。排除本应用自身的窗口，避免误判。
+// 安全保护：
+// 1) 系统空闲超过阈值时跳过检测——长时间挂机后 macOS 可能回收/挂起后台进程，
+//    CGWindowList 仍可能返回陈旧窗口条目，其 owner PID 对应的 NSRunningApplication
+//    已为 nil，原生层虽有空指针保护，但此处再提前规避可减少无效调用。
+// 2) active.path 为空/undefined 时直接返回 false，避免后续比对与边界计算误判。
+const IDLE_SKIP_THRESHOLD_MS = 5 * 60 * 1000  // 系统空闲超过 5 分钟则跳过全屏检测
 function isForegroundFullscreen() {
     if (!windowManager) return false
     try {
+        // 系统空闲时间过长时跳过：挂机场景下无人在看全屏，无需检测
+        const idleMs = (typeof powerMonitor.getSystemIdleTime === 'function')
+            ? powerMonitor.getSystemIdleTime() * 1000 : 0
+        if (idleMs > IDLE_SKIP_THRESHOLD_MS) {
+            return false
+        }
+
         const active = windowManager.getActiveWindow()
         if (!active) return false
+
+        // path 为空说明原生层拿到了陈旧/异常窗口条目（owner 进程已不存在），
+        // 此时边界信息不可靠，直接返回 false 避免误判与潜在风险。
+        if (!active.path) return false
 
         // 排除本应用自身窗口（按可执行文件路径比对）
         try {
