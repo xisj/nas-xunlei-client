@@ -1,6 +1,6 @@
 {
   "name": "synology-xunlei-client",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "",
   "main": "src/main.js",
   "scripts": {
@@ -51,6 +51,7 @@
     },
     "win": {
       "icon": "src/icon-256.ico",
+      "artifactName": "nas-xunlei-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -67,10 +68,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "nas迅雷"
+      "shortcutName": "nas迅雷",
+      "artifactName": "nas-xunlei-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
       "icon": "src/icon.png",
+      "artifactName": "nas-xunlei-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",

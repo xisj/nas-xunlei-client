@@ -207,10 +207,10 @@ jobs:
             自动构建的桌面客户端。
 
             ### 安装包（推荐新用户使用，支持自动更新）
-            - Windows 64 位安装包 (`nas迅雷-Setup-${{ env.VERSION_TAG }}-x64.exe`)
-            - Windows 32 位安装包 (`nas迅雷-Setup-${{ env.VERSION_TAG }}-ia32.exe`)
-            - macOS Intel (`nas迅雷-${{ env.VERSION_TAG }}-intel.dmg`)
-            - macOS Apple Silicon (`nas迅雷-${{ env.VERSION_TAG }}-arm64.dmg`)
+            - Windows 64 位安装包 (`nas-xunlei-Setup-${{ env.VERSION_TAG }}-x64.exe`)
+            - Windows 32 位安装包 (`nas-xunlei-Setup-${{ env.VERSION_TAG }}-ia32.exe`)
+            - macOS Intel (`nas-xunlei-${{ env.VERSION_TAG }}-x64.dmg`)
+            - macOS Apple Silicon (`nas-xunlei-${{ env.VERSION_TAG }}-arm64.dmg`)
 
             ### 免安装版（兼容老用户）
             - Windows 64 位 (`nas-xunlei-win64-*.zip`)
@@ -227,6 +227,13 @@ jobs:
 
             ### 校验
             各文件的 SHA-256 见 `CHECKSUMS.txt`
-          files: artifacts/*
+          files: |
+            artifacts/*.dmg
+            artifacts/*.exe
+            artifacts/*.zip
+            artifacts/latest*.yml
+            artifacts/builder-debug.yml
+            artifacts/CHECKSUMS.txt
+            artifacts/*.blockmap
           draft: false
           prerelease: false
