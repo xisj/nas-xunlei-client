@@ -1,6 +1,6 @@
 {
   "name": "synology-xunlei-client",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "",
   "main": "src/main.js",
   "scripts": {
@@ -107,26 +107,25 @@
     },
     "dmg": {
       "title": "${productName} ${version}",
+      "window": {
+        "width": 660,
+        "height": 400
+      },
       "contents": [
         {
-          "x": 130,
-          "y": 180
+          "x": 160,
+          "y": 150
         },
         {
-          "x": 410,
-          "y": 180,
+          "x": 480,
+          "y": 150,
           "type": "link",
           "path": "/Applications"
         },
         {
-          "x": 130,
-          "y": 350,
-          "path": "src/dmg-files/README.txt"
-        },
-        {
-          "x": 410,
-          "y": 350,
-          "path": "src/dmg-files/修复无法打开.command"
+          "x": 320,
+          "y": 320,
+          "path": "src/dmg-files/README.rtf"
         }
       ]
     }
