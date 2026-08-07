@@ -160,11 +160,33 @@ jobs:
       - name: Collect installer artifacts
         shell: bash
         run: |
-          mkdir -p dist-zip
-          # 复制 electron-builder 产物到 dist-zip
-          # 不收集 builder-debug.yml（纯调试信息，用户和 updater 都不需要）
-          # 不收集 *.blockmap（updater 缺失时自动回退全量下载，保持 Release 列表整洁）
-          find release -maxdepth 1 -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "latest*.yml" \) -exec cp {} dist-zip/ \;
+          # dist-zip 已有 electron-packager 免安装版 zip（Create portable zip 步骤生成）
+          # 这里只收集 electron-builder 产物（dmg/exe/zip/yml）
+          #
+          # 关键：每个 job 只收集自己负责的架构，避免 artifact 合并时
+          # 同名文件冲突覆盖导致 dmg 损坏。
+          PLATFORM="${{ matrix.platform }}"
+          ARCH="${{ matrix.arch }}"
+
+          if [ "$PLATFORM" = "darwin" ]; then
+            # electron-builder dmg/zip，按架构过滤
+            cp release/*-${ARCH}.dmg release/*-${ARCH}.zip dist-zip/ 2>/dev/null || true
+            # latest-mac.yml 只在 arm64 job 收集一次
+            if [ "$ARCH" = "arm64" ]; then
+              cp release/latest-mac.yml dist-zip/ 2>/dev/null || true
+            fi
+          elif [ "$PLATFORM" = "win32" ]; then
+            if [ "$ARCH" = "x64" ]; then
+              cp release/*-x64.exe dist-zip/ 2>/dev/null || true
+              # 无 arch 后缀的 exe 是 x64+ia32 合并包，只在 x64 job 收集
+              cp release/nas-xunlei-Setup-*.exe dist-zip/ 2>/dev/null || true
+              rm -f dist-zip/*-ia32.exe 2>/dev/null || true
+              # latest.yml 只在 x64 job 收集
+              cp release/latest.yml dist-zip/ 2>/dev/null || true
+            else
+              cp release/*-ia32.exe dist-zip/ 2>/dev/null || true
+            fi
+          fi
           echo "--- all artifacts ---"
           ls -la dist-zip/
 
@@ -220,12 +242,40 @@ jobs:
             - macOS Intel (`nas-xunlei-mac-intel-*.zip`)
             - macOS Apple Silicon (`nas-xunlei-mac-arm-*.zip`)
 
-            ### 安装说明
-            - **Windows 安装包**: 下载 `.exe` 双击安装，后续版本可自动更新
-            - **Windows 免安装版**: 解压后运行 `nas迅雷.exe`
-            - **macOS**: 下载 `.dmg` 拖入"应用程序"，首次打开如提示无法验证开发者，
-              请右键点击应用 → 打开（或系统设置 → 隐私与安全性 → 仍要打开）
-            - **macOS 自动更新**: 需要代码签名支持，目前请手动下载新版本
+            ### ⚠️ macOS 安装说明（重要！请先阅读再下载）
+
+            由于本应用未经 Apple 开发者签名，下载的 dmg 会被 macOS 标记为"已损坏"，
+            **这是正常现象，dmg 本身没有问题**。请按以下步骤操作：
+
+            **方法一：终端命令（推荐，最快捷）**
+
+            1. 下载 dmg 文件
+            2. 打开「终端」应用（启动台 → 其他 → 终端）
+            3. 粘贴以下命令并回车（把 `下载的文件名` 替换为实际文件名）：
+
+            ```
+            xattr -cr ~/Downloads/nas-xunlei-${{ env.VERSION_TAG }}-arm64.dmg
+            ```
+
+            > Intel Mac 用户请将 `arm64` 改为 `x64`
+            4. 双击打开 dmg，将 nas迅雷 拖到 Applications 文件夹
+            5. 在「应用程序」中右键点击 nas迅雷 → 选择「打开」→ 在弹窗中点击「打开」
+
+            **方法二：右键打开 dmg**
+
+            1. 在「访达」的「下载」文件夹中，**右键点击** dmg 文件
+            2. 选择「打开」→ 在弹窗中点击「打开」
+            3. 打开后将 nas迅雷 拖到 Applications 文件夹
+            4. 在「应用程序」中右键点击 nas迅雷 → 选择「打开」→ 在弹窗中点击「打开」
+
+            **dmg 内附带的修复脚本**
+
+            成功打开 dmg 后，里面有一个「修复无法打开.command」文件，
+            拖到桌面后右键打开运行，可自动修复应用的隔离属性。
+
+            ### Windows 安装说明
+            - **安装包**: 下载 `.exe` 双击安装，后续版本可自动更新
+            - **免安装版**: 解压后运行 `nas迅雷.exe`
 
             ### 校验
             各文件的 SHA-256 见 `nas-xunlei-CHECKSUMS.txt`
