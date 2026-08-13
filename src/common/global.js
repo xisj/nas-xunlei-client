@@ -5,7 +5,8 @@ const func = require('./func')
 
 global.configFile = path.join(path.dirname(__dirname), "/config.json")
 if (app.isPackaged) {
-    global.configFile = path.join(path.dirname(app.getPath('exe')), "/config.json")
+    // 打包后写入安装目录(Program Files)无权限，改用 Electron userData 目录(%APPDATA%/nas迅雷)
+    global.configFile = path.join(app.getPath('userData'), "/config.json")
 }
 global.config = {}
 if (fs.existsSync(global.configFile)) {
