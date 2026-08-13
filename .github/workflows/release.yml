@@ -74,10 +74,15 @@ jobs:
       - name: Build settings page (ui2 -> assets)
         run: npm run build:ui2
 
-      - name: Rebuild native module for Electron (${{ matrix.arch }})
+      - name: Rebuild native modules for Electron (${{ matrix.arch }})
+        # -f 强制从源码重新编译，确保 macos.mm 的空指针补丁被编入 .node。
+        # electron-builder 内置的 @electron/rebuild 默认 buildFromSource=false，
+        # 会沿用 build/Release/ 下缓存二进制；此处先 -f 重建可保证补丁生效。
         env:
           npm_config_arch: ${{ matrix.arch }}
-        run: npx electron-rebuild -f -w node-window-manager -a ${{ matrix.arch }}
+        run: |
+          npx electron-rebuild -f -w node-window-manager -a ${{ matrix.arch }}
+          npx electron-rebuild -f -w extract-file-icon -a ${{ matrix.arch }}
 
       # ============ 1. Portable zip (electron-packager，兼容老用户) ============
       - name: Package portable with electron-packager
