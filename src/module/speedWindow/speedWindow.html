@@ -582,6 +582,9 @@
             // 拖动时隐藏任务列表，避免列表被裁切只露出顶部阴影
             const tl = document.getElementById('task-list')
             tl.classList.remove('show')
+            isTaskListVisible = false
+            clearTimeout(taskListAutoCloseTimer)
+            taskListAutoCloseTimer = null
             ipcRenderer.send('speed-window-drag-start')
         })
 
@@ -621,6 +624,8 @@
         const taskListEl = document.getElementById('task-list')
         const speedContainerEl = document.getElementById('container')
         let isTaskListVisible = false  // 任务列表是否正在显示
+        let taskListEmpty = true       // 当前任务列表是否为空（决定点击行为）
+        let taskListAutoCloseTimer = null  // 10 秒无鼠标经过自动关闭定时器
 
         // 向主进程上报可交互区域的矩形（相对窗口客户区的 DIP 坐标）。
         // 主进程据此把胶囊/任务列表之外的透明区域设为点击穿透。
@@ -649,18 +654,43 @@
             return num + 'B'
         }
 
+        // 收起任务列表并恢复窗口高度
+        function hideTaskList() {
+            taskListEl.classList.remove('show')
+            isTaskListVisible = false
+            clearTimeout(taskListAutoCloseTimer)
+            taskListAutoCloseTimer = null
+            ipcRenderer.send('resize-speed-window', getCollapsedHeight())
+            sendInteractiveRects()
+        }
+
+        // 10 秒内鼠标未经过窗口则自动收起任务列表；窗口内鼠标活动会重置倒计时
+        function scheduleTaskListAutoClose() {
+            clearTimeout(taskListAutoCloseTimer)
+            taskListAutoCloseTimer = setTimeout(() => {
+                taskListAutoCloseTimer = null
+                if (isTaskListVisible && !isDragging) {
+                    console.log('task list auto-close: no mouse activity for 10s')
+                    hideTaskList()
+                }
+            }, 10000)
+        }
+
         // 渲染任务列表（只显示正在下载的任务）
         function renderTaskList(tasks) {
             if (!tasks || tasks.length === 0) {
+                taskListEmpty = true
                 taskListEl.innerHTML = '<div class="empty-tip">暂无任务</div>'
                 return
             }
             // 过滤：只显示正在下载的任务
             const runningTasks = tasks.filter(task => task.isRunning)
             if (runningTasks.length === 0) {
+                taskListEmpty = true
                 taskListEl.innerHTML = '<div class="empty-tip">暂无下载任务</div>'
                 return
             }
+            taskListEmpty = false
             let html = ''
             runningTasks.forEach(task => {
                 const name = task.fileName || task.name || '未知任务'
@@ -719,6 +749,7 @@
         ipcRenderer.on('task-list-response', (e, data) => {
             if (isDragging) return  // 拖动中不展开列表
             console.log('task-list-response received:', data.tasks?.length)
+            const wasVisible = isTaskListVisible
             renderTaskList(data.tasks)
             taskListEl.classList.add('show')
             isTaskListVisible = true
@@ -726,21 +757,37 @@
             const totalHeight = TOP_PAD + speedContainerEl.offsetHeight + TASK_MARGIN + taskListEl.offsetHeight + BOTTOM_PAD
             ipcRenderer.send('resize-speed-window', totalHeight)
             sendInteractiveRects()
+            // 仅首次展开时启动自动关闭倒计时；
+            // 任务数据刷新（task-list-update 触发的重取）不重置，否则会永不关闭
+            if (!wasVisible) {
+                scheduleTaskListAutoClose()
+            }
         })
 
-        // 鼠标离开隐藏任务列表
+        // 鼠标离开后不立即收起，交给 10 秒自动关闭倒计时
+        // （移动到透明间隙时 mouseleave 会误触发，立即收起会导致列表一闪而过）
         document.body.addEventListener('mouseleave', () => {
-            taskListEl.classList.remove('show')
-            isTaskListVisible = false
-            // 恢复窗口高度
-            ipcRenderer.send('resize-speed-window', getCollapsedHeight())
-            sendInteractiveRects()
+            if (isTaskListVisible) {
+                scheduleTaskListAutoClose()
+            }
         })
 
-        // 点击任务列表也唤起主窗口
+        // 窗口内鼠标活动视为"经过"，重置自动关闭倒计时
+        document.body.addEventListener('mousemove', () => {
+            if (isTaskListVisible && !isDragging) {
+                scheduleTaskListAutoClose()
+            }
+        })
+
+        // 点击任务列表：空列表仅关闭列表窗口；有任务则唤起主窗口
         taskListEl.addEventListener('click', () => {
-            console.log('task list clicked')
-            ipcRenderer.send('speed-window-click')
+            if (taskListEmpty) {
+                console.log('empty task list clicked, closing')
+                hideTaskList()
+            } else {
+                console.log('task list clicked')
+                ipcRenderer.send('speed-window-click')
+            }
         })
 
         // 窗口失去焦点时隐藏任务列表
@@ -749,6 +796,8 @@
             const tl = document.getElementById('task-list')
             tl.classList.remove('show')
             isTaskListVisible = false
+            clearTimeout(taskListAutoCloseTimer)
+            taskListAutoCloseTimer = null
             sendInteractiveRects()
         })
 

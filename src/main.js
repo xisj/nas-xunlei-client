@@ -11,12 +11,15 @@ function extractProtocolUrl(args) {
     return args.find(arg => {
         // 排除以 -- 开头的参数（Electron/Chromium 参数）
         if (arg.startsWith('--')) return false
-        // 排除 exe 路径本身
-        if (arg.endsWith('.exe')) return false
-        // 排除文件路径（包含 .lnk, .url 等）
-        if (arg.includes('.lnk') || arg.includes('.url')) return false
-        // 排除 Windows 路径格式（如 C:\）
-        if (/^[A-Z]:\\/i.test(arg)) return false
+        // 以下为 Windows 特有路径过滤，Mac/Linux 上不会匹配，跳过判断以保持兼容
+        if (process.platform === 'win32') {
+            // 排除 exe 路径本身
+            if (arg.endsWith('.exe')) return false
+            // 排除文件路径（包含 .lnk, .url 等）
+            if (arg.includes('.lnk') || arg.includes('.url')) return false
+            // 排除 Windows 路径格式（如 C:\）
+            if (/^[A-Z]:\\/i.test(arg)) return false
+        }
         // 只接受有效的协议链接
         return (
             arg.startsWith('magnet:') ||
@@ -152,7 +155,9 @@ if (!gotTheLock) {
     })
 
     app.whenReady().then(() => {
-        mainWindow.create("icon.ico")
+        // Mac 上 .ico 不被支持，使用 .png
+        const iconFile = process.platform === 'darwin' ? 'icon.png' : 'icon.ico'
+        mainWindow.create(iconFile)
         // 初始化自动更新
         updater.init()
         updater.startAutoCheck()

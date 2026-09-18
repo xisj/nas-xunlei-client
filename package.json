@@ -19,7 +19,7 @@
   },
   "keywords": [],
   "author": "xisj",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "dependencies": {
     "electron-updater": "^6.8.9",
     "node-window-manager": "^2.2.4",
