@@ -39,7 +39,7 @@ let speedInteractiveRects = []  // 浮窗内可交互区域（胶囊/任务列�
 let speedWindowDragging = false  // 浮窗是否正在拖拽（拖拽期间禁止穿透，避免松手丢失）
 let speedClickThroughTimer = null  // 浮窗点击穿透轮询定时器
 let speedClickThroughActive = false  // 当前鼠标是否位于可交互区域（false 表示窗口处于穿透/忽略鼠标状态）
-let speedCursorOutsideSince = null  // 光标完全离开浮窗边界的时间戳（null=光标在窗口内）
+let speedCursorOutsideSince = null  // 光标离开所有可交互区域的时间戳（null=光标在胶囊/任务列表上）
 let speedMouseLeaveNotified = false  // 本次离开是否已通知渲染进程收起任务列表
 
 // 检测前台窗口是否为全屏应用（全屏视频/全屏游戏等）
@@ -339,10 +339,12 @@ function updateSpeedClickThrough() {
     speedClickThroughActive = interactive
     speedWindow.setIgnoreMouseEvents(!interactive, { forward: true })
 
-    // 光标完全离开浮窗超过 1 秒后，通知渲染进程收起任务列表。
+    // 光标离开所有可交互区域（即停在透明区或窗口外）超过 1 秒后，
+    // 通知渲染进程收起任务列表。不能用 insideWindow 判定：胶囊比任务列表窄，
+    // 窗口内存在大片透明区，光标停在那里 insideWindow=true 会永远不收起。
     // 不走 DOM mouseleave：透明区域处于点击穿透状态时 mousemove/mouseleave
     // 事件转发不可靠（Windows 上 forward 不生效），轮询坐标才稳定。
-    if (insideWindow) {
+    if (interactive) {
         speedCursorOutsideSince = null
         speedMouseLeaveNotified = false
     } else {
