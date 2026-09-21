@@ -128,6 +128,10 @@ function restoreSpeedWindow() {
 // 注册浮窗点击事件监听器（只注册一次）
 ipcMain.on('speed-window-click', () => {
     logger.log('[SPEED WINDOW] Clicked, showing main window')
+    // 点击意味着拖拽会话已结束：渲染进程只在"拖动过"的 mouseup 上发 drag-end，
+    // 普通点击不会发，必须在这里复位拖拽标志，否则 updateSpeedClickThrough 会
+    // 一直强制窗口可交互，透明区域永久拦截点击（"隐形窗口"bug）
+    speedWindowDragging = false
     show()
     // 点击后重新置顶速度窗口，避免被主窗口或全屏窗口盖住后消失
     restoreSpeedWindow()
@@ -304,10 +308,8 @@ function updateSpeedClickThrough() {
 
     if (speedWindowDragging) {
         // 拖拽期间强制可交互，避免指针划过透明区域时松手事件被穿透吞掉
-        if (!speedClickThroughActive) {
-            speedClickThroughActive = true
-            speedWindow.setIgnoreMouseEvents(false)
-        }
+        speedClickThroughActive = true
+        speedWindow.setIgnoreMouseEvents(false)
         return
     }
 
@@ -328,10 +330,10 @@ function updateSpeedClickThrough() {
         }
     }
 
-    if (interactive !== speedClickThroughActive) {
-        speedClickThroughActive = interactive
-        speedWindow.setIgnoreMouseEvents(!interactive, { forward: true })
-    }
+    // 无条件应用目标状态：NSWindow 的 ignoresMouseEvents 可能因窗口 show/置顶切换等
+    // 被系统重置，若依赖本地标志跳过重复调用，原生状态与本地状态会失同步
+    speedClickThroughActive = interactive
+    speedWindow.setIgnoreMouseEvents(!interactive, { forward: true })
 }
 
 function getXunleiURL(_nasURL) {
@@ -1347,6 +1349,12 @@ function createSpeedWindow() {
 
     speedWindow.webContents.on('did-fail-load', (e, errorCode, errorDescription) => {
         logger.log('[SPEED WINDOW] Failed to load HTML:', errorCode, errorDescription)
+    })
+
+    // 失焦时拖拽会话已不可能继续（如按下后 Cmd-Tab 切走、mouseup 落在窗口外），
+    // 复位拖拽标志防止残留，否则点击穿透会被永久禁用
+    speedWindow.on('blur', () => {
+        speedWindowDragging = false
     })
 
     speedWindow.on('closed', () => {

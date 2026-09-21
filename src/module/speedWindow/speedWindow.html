@@ -586,6 +586,8 @@
             isTaskListVisible = false
             clearTimeout(taskListAutoCloseTimer)
             taskListAutoCloseTimer = null
+            // 同步上报可交互区域：列表已隐藏，避免其原矩形仍被当作可交互而拦截点击
+            sendInteractiveRects()
             ipcRenderer.send('speed-window-drag-start')
         })
 
@@ -792,14 +794,11 @@
         })
 
         // 窗口失去焦点时隐藏任务列表
+        // 用 hideTaskList() 同时收回窗口高度：否则扩展出的透明区域仍盖在主窗口上方，
+        // 一旦点击穿透状态异常就会形成"隐形窗口"挡住点击
         window.addEventListener('blur', () => {
             logger.log('window blurred, hiding task list')
-            const tl = document.getElementById('task-list')
-            tl.classList.remove('show')
-            isTaskListVisible = false
-            clearTimeout(taskListAutoCloseTimer)
-            taskListAutoCloseTimer = null
-            sendInteractiveRects()
+            hideTaskList()
         })
 
         // 右键菜单：发送 IPC 到主进程，使用 Electron 原生 Menu
