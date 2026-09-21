@@ -5,6 +5,7 @@ const url = require('url')
 const net = require('net')
 const func = require('../../common/func')
 require('../../common/global')
+const logger = require('../../common/logger')
 let psl = require('psl');
 // 原生窗口管理模块，用于检测前台是否有全屏应用（视频/游戏）。
 // 用 try/catch 包裹，加载失败时优雅降级，不影响主流程。
@@ -12,7 +13,7 @@ let windowManager = null
 try {
     windowManager = require('node-window-manager').windowManager
 } catch (e) {
-    console.log('[FULLSCREEN] node-window-manager load failed:', e.message)
+    logger.log('[FULLSCREEN] node-window-manager load failed:', e.message)
 }
 let win
 // 使用getter确保外部模块拿到的总是最新的win引用
@@ -126,7 +127,7 @@ function restoreSpeedWindow() {
 
 // 注册浮窗点击事件监听器（只注册一次）
 ipcMain.on('speed-window-click', () => {
-    console.log('[SPEED WINDOW] Clicked, showing main window')
+    logger.log('[SPEED WINDOW] Clicked, showing main window')
     show()
     // 点击后重新置顶速度窗口，避免被主窗口或全屏窗口盖住后消失
     restoreSpeedWindow()
@@ -157,7 +158,7 @@ ipcMain.on('resize-speed-window', (e, height) => {
 // 注册速度窗口任务项打开文件夹请求
 ipcMain.on('speed-window-open-task-folder', (e, data) => {
     if (!win || win.isDestroyed()) return
-    console.log('[SPEED WINDOW] Open task folder:', data.taskName)
+    logger.log('[SPEED WINDOW] Open task folder:', data.taskName)
     // 转发到渲染进程，由 preload.js 处理
     win.webContents.send('open-task-folder-from-speed-window', data)
 })
@@ -165,7 +166,7 @@ ipcMain.on('speed-window-open-task-folder', (e, data) => {
 // 注册速度窗口右键菜单请求（使用 Electron 原生 Menu）
 ipcMain.on('speed-window-contextmenu', (e, data) => {
     const { Menu, screen } = require('electron')
-    console.log('[SPEED WINDOW] Context menu request:', data.type)
+    logger.log('[SPEED WINDOW] Context menu request:', data.type)
 
     if (!speedWindow || speedWindow.isDestroyed()) return
 
@@ -178,7 +179,7 @@ ipcMain.on('speed-window-contextmenu', (e, data) => {
         const menuX = winWidth - 100  // 窗口右边缘向左100px
         const menuY = SPEED_WINDOW_HEIGHT  // 速度胶囊初始高度（66px）
 
-        console.log('[SPEED WINDOW] Speed window menu pos:', menuX, menuY)
+        logger.log('[SPEED WINDOW] Speed window menu pos:', menuX, menuY)
 
         const template = [
             {
@@ -187,7 +188,7 @@ ipcMain.on('speed-window-contextmenu', (e, data) => {
                     const { shell } = require('electron')
                     if (global.config && global.config.sharedPath) {
                         shell.openPath(global.config.sharedPath).catch(err => {
-                            console.log('open download folder error:', err)
+                            logger.log('open download folder error:', err)
                         })
                     }
                 }
@@ -238,14 +239,14 @@ ipcMain.on('speed-window-contextmenu', (e, data) => {
         const menuX = data.x
         const menuY = data.y
 
-        console.log('[SPEED WINDOW] Task item menu pos:', menuX, menuY)
+        logger.log('[SPEED WINDOW] Task item menu pos:', menuX, menuY)
 
         const template = [
             {
                 label: '打开文件夹',
                 click: () => {
                     if (!win || win.isDestroyed()) return
-                    console.log('[SPEED WINDOW] Open task folder:', data.taskName)
+                    logger.log('[SPEED WINDOW] Open task folder:', data.taskName)
                     // 转发到渲染进程，由 preload.js 处理
                     win.webContents.send('open-task-folder-from-speed-window', { taskName: data.taskName })
                 }
@@ -282,7 +283,7 @@ ipcMain.on('speed-window-drag-move', () => {
 ipcMain.on('speed-window-drag-end', () => {
     if (speedWindow && !speedWindow.isDestroyed()) {
         const [x, y] = speedWindow.getPosition()
-        console.log('[SPEED WINDOW] Drag end, saving position:', x, y)
+        logger.log('[SPEED WINDOW] Drag end, saving position:', x, y)
         setConfig({ speedWindowPosition: { x, y } })
     }
     speedWindowDragging = false
@@ -334,7 +335,7 @@ function updateSpeedClickThrough() {
 }
 
 function getXunleiURL(_nasURL) {
-    console.log("============================getXunleiURL", null != win, win.webContents.getURL())
+    logger.log("============================getXunleiURL", null != win, win.webContents.getURL())
     if (null != win
         && "" != win.webContents.getURL()) {
 
@@ -372,16 +373,16 @@ module.exports.create = async function create(iconPath) {
         icon: iconPath
     })
     // win.webContents.openDevTools()  // 临时打开 DevTools 查看速度提取日志
-    
+
     // 内容准备好后再显示窗口，避免白屏/透明窗口闪烁
     win.once('ready-to-show', () => {
-        console.log('ready-to-show: showing window')
+        logger.log('ready-to-show: showing window')
         win.show()
     })
     if (global.config.hasOwnProperty('nasURL')) {
         let _xunleiURL = global.config.nasURL
         let canAutoLogin = await checkNasLoginStatus(global.config.nasURL).catch(e => {
-            console.log(e)
+            logger.log(e)
         })
         if (canAutoLogin) {
             _xunleiURL = getXunleiURL(global.config.nasURL)
@@ -391,7 +392,7 @@ module.exports.create = async function create(iconPath) {
                 watchClipboard()
             }
         }).catch(e => {
-            console.log("loadURL,catch", e)
+            logger.log("loadURL,catch", e)
             // 避免因主动切换到本地设置页导致的 ERR_ABORTED 噪音
             if (!(e && e.code === 'ERR_ABORTED')) {
                 loadDefaultHTML(20002, 'show-err', e.toString())
@@ -447,21 +448,21 @@ module.exports.create = async function create(iconPath) {
         }
 
         // 非输入区域右键且剪贴板里是下载链接：自动添加任务
-        console.log('context-menu', clipText.length > 0, isInXunleiApp())
+        logger.log('context-menu', clipText.length > 0, isInXunleiApp())
         if ("" !== clipText && true === isInXunleiApp() && checkURL(clipText)) {
             addXunLeiTask(clipText)
         }
     })
 
     // win.webContents.on('did-fail-load', (e, errorCode, errorMsg, validateURL, isMainFrame) => {
-    //     console.log("did-fail-load", errorCode, errorMsg, validateURL, isMainFrame)
+    //     logger.log("did-fail-load", errorCode, errorMsg, validateURL, isMainFrame)
     //     loadDefaultHTML(20001, 'show-err', "did-fail-load:" + errorMsg)
     // })
     win.webContents.on('did-finish-load', (e) => {
-        console.log("did-finish-load", win.webContents.getURL(), win.webContents.getURL().indexOf('pan-xunlei-com'))
+        logger.log("did-finish-load", win.webContents.getURL(), win.webContents.getURL().indexOf('pan-xunlei-com'))
         // 如果有待处理的任务URL，页面加载完成后重新添加
         if (pendingTaskUrl) {
-            console.log('Resuming pending task after page load:', pendingTaskUrl)
+            logger.log('Resuming pending task after page load:', pendingTaskUrl)
             const taskUrl = pendingTaskUrl
             pendingTaskUrl = null
             // 等待更长时间，让 Vue 应用完全初始化（特别是刚启动时）
@@ -474,7 +475,7 @@ module.exports.create = async function create(iconPath) {
         if (win.webContents.getURL().indexOf('pan-xunlei-com') > 0) {
             // 确保剪贴板监听已启动（登录/导航到迅雷页面后即生效）
             if (!clipboardWatchActive) {
-                console.log('[CLIPBOARD] starting watch on xunlei page load')
+                logger.log('[CLIPBOARD] starting watch on xunlei page load')
                 watchClipboard()
             }
             setTimeout(() => {
@@ -494,15 +495,15 @@ module.exports.create = async function create(iconPath) {
     })
 
     win.webContents.on('did-frame-finish-load', async (e, isMainFrame) => {
-        console.log("did-frame-finish-load", isMainFrame)
+        logger.log("did-frame-finish-load", isMainFrame)
     })
     win.webContents.on('dom-ready', (e) => {
-        console.log("dom-ready")
+        logger.log("dom-ready")
         // checkNasLoginStatus(global.config.nasURL)
     })
     win.webContents.on('did-stop-loading', (e) => {
-        console.log("did-stop-loading")
-        // console.log(win.webContents.getTitle(), win.webContents.getTitle().indexOf("Synology"),win.webContents.getTitle().indexOf("NAS"))
+        logger.log("did-stop-loading")
+        // logger.log(win.webContents.getTitle(), win.webContents.getTitle().indexOf("Synology"),win.webContents.getTitle().indexOf("NAS"))
         // // checkNasLoginStatus(global.config.nasURL)
         // if(win.webContents.getTitle().indexOf("Synology")> 1 && win.webContents.getTitle().indexOf("NAS") > 3) {
         //
@@ -515,9 +516,9 @@ module.exports.create = async function create(iconPath) {
 
     })
     win.webContents.on('did-navigate', async (e, url, isMainFrame, httpResponseCode, httpStatusText) => {
-        console.log("did-navigate", url, isMainFrame, httpResponseCode, httpStatusText, global.config.nasUR, await checkNasLoginStatus(global.config.nasURL))
+        logger.log("did-navigate", url, isMainFrame, httpResponseCode, httpStatusText, global.config.nasUR, await checkNasLoginStatus(global.config.nasURL))
         if ("undefined" === typeof (global.config.nasURL)) {
-            console.log("nasURL is empty")
+            logger.log("nasURL is empty")
             return
         }
         let _nasURL = global.config.nasURL
@@ -537,14 +538,14 @@ module.exports.create = async function create(iconPath) {
         }
     })
     win.webContents.on('did-frame-navigate', async (e, url, httpResponseCode, httpStatusText, isMainFrame) => {
-        console.log("did-frame-navigate", url, httpResponseCode, httpStatusText, isMainFrame, await checkNasLoginStatus(global.config.nasURL), (url === global.config.nasURL || url === global.config.nasURL + "/"))
+        logger.log("did-frame-navigate", url, httpResponseCode, httpStatusText, isMainFrame, await checkNasLoginStatus(global.config.nasURL), (url === global.config.nasURL || url === global.config.nasURL + "/"))
         if (await checkNasLoginStatus(global.config.nasURL) && (url === global.config.nasURL || url === global.config.nasURL + "/")) {
             _xunleiURL = getXunleiURL(global.config.nasURL)
             win.webContents.loadURL(_xunleiURL)
         }
     })
     win.webContents.on('did-navigate-in-page', async (e, url, isMainFrame) => {
-        console.log("did-navigate-in-page", url, isMainFrame, await checkNasLoginStatus(global.config.nasURL), (url === global.config.nasURL || url === global.config.nasURL + "/"))
+        logger.log("did-navigate-in-page", url, isMainFrame, await checkNasLoginStatus(global.config.nasURL), (url === global.config.nasURL || url === global.config.nasURL + "/"))
         if (await checkNasLoginStatus(global.config.nasURL) && (url === global.config.nasURL || url === global.config.nasURL + "/")) {
             _xunleiURL = getXunleiURL(global.config.nasURL)
             win.webContents.loadURL(_xunleiURL)
@@ -557,7 +558,7 @@ module.exports.create = async function create(iconPath) {
 
         // 标记退出中，立即清理定时器
         global.__isQuitting = true
-        console.log('User chose to quit')
+        logger.log('User chose to quit')
         cleanupTimers()
         // 调用 app.quit() 会触发 before-quit，在那里统一清理
         app.quit()
@@ -575,14 +576,14 @@ module.exports.create = async function create(iconPath) {
     const markHidden = () => {
         if (lastHiddenAt === 0) {
             lastHiddenAt = Date.now()
-            console.log('window hidden/blurred at', new Date(lastHiddenAt).toISOString())
+            logger.log('window hidden/blurred at', new Date(lastHiddenAt).toISOString())
         }
     }
     const refreshIfStale = (reason) => {
         if (lastHiddenAt === 0) return
         const hiddenDuration = Date.now() - lastHiddenAt
         lastHiddenAt = 0
-        console.log(`window active again (${reason}), hidden for ${hiddenDuration}ms`)
+        logger.log(`window active again (${reason}), hidden for ${hiddenDuration}ms`)
         if (hiddenDuration < STALE_THRESHOLD_MS) return
         if (!win || win.isDestroyed()) return
         const currentUrl = win.webContents.getURL()
@@ -591,10 +592,10 @@ module.exports.create = async function create(iconPath) {
         checkNasLoginStatus(global.config.nasURL).then(isLoggedIn => {
             if (!win || win.isDestroyed()) return
             if (isLoggedIn) {
-                console.log('stale page detected, reloading xunlei page')
+                logger.log('stale page detected, reloading xunlei page')
                 win.webContents.reload()
             } else {
-                console.log('stale page + session expired, navigating to nas login')
+                logger.log('stale page + session expired, navigating to nas login')
                 win.webContents.loadURL(global.config.nasURL)
             }
         }).catch(() => {
@@ -618,15 +619,15 @@ module.exports.create = async function create(iconPath) {
                 // 检查session是否过期
                 checkNasLoginStatus(global.config.nasURL).then(isLoggedIn => {
                     if (!isLoggedIn) {
-                        console.log('Session expired, reloading to login page')
+                        logger.log('Session expired, reloading to login page')
                         win.webContents.loadURL(global.config.nasURL)
                     } else {
                         // Session有效，执行刷新
-                        console.log('Auto-reloading xunlei page (every 30 minutes)')
+                        logger.log('Auto-reloading xunlei page (every 30 minutes)')
                         win.webContents.reload()
                     }
                 }).catch(e => {
-                    console.log('Check login status failed, force reload:', e)
+                    logger.log('Check login status failed, force reload:', e)
                     win.webContents.reload()
                 })
             }
@@ -647,16 +648,16 @@ module.exports.create = async function create(iconPath) {
         ).then(ts => {
             resolved = true
             const drift = Date.now() - ts
-            console.log('Health check ok, time drift =', drift, 'ms')
+            logger.log('Health check ok, time drift =', drift, 'ms')
         }).catch(e => {
             resolved = true
-            console.log('Health check exception, force reload:', e)
+            logger.log('Health check exception, force reload:', e)
             try { win.webContents.reload() } catch (_) {}
         })
 
         setTimeout(() => {
             if (!resolved) {
-                console.log('Health check TIMEOUT (renderer frozen), force reload')
+                logger.log('Health check TIMEOUT (renderer frozen), force reload')
                 try {
                     if (win && !win.isDestroyed()) {
                         win.webContents.reload()
@@ -670,7 +671,7 @@ module.exports.create = async function create(iconPath) {
 
 
 function loadDefaultHTML(code, action, msg) {
-    console.log("loadDefaultHTML::::::", code, action, msg)
+    logger.log("loadDefaultHTML::::::", code, action, msg)
     // 停止可能在进行中的网络加载，避免导航互相打断
     try { win.webContents.stop() } catch (e) {}
     // 若已在设置页，则不重复加载，减少 ERR_ABORTED 噪音
@@ -678,7 +679,7 @@ function loadDefaultHTML(code, action, msg) {
     try { _cur = win.webContents.getURL() } catch (e) {}
     const already = (_cur && _cur.indexOf('mainWindow.html') > -1 && _cur.indexOf('file:') === 0)
     if (!already) {
-        win.loadFile(path.join(__dirname, 'mainWindow.html')).catch(e => { console.log(e) })
+        win.loadFile(path.join(__dirname, 'mainWindow.html')).catch(e => { logger.log(e) })
     }
     setTimeout(() => {
         // 仅当提供了 action 时才发送第一条消息，避免渲染进程因 action 缺失报错
@@ -686,7 +687,7 @@ function loadDefaultHTML(code, action, msg) {
             win.webContents.send('mainWindow-msg', global.lang.getMsg(code || 0, action, msg || ''))
         }
         win.webContents.send('mainWindow-msg', global.lang.getMsg(0, "set-config", global.config))
-        console.log(global.config)
+        logger.log(global.config)
     }, 500)
 }
 
@@ -716,7 +717,7 @@ module.exports.hide = hide
 
 
 ipcMain.on('mainWindow-msg', (e, args) => {
-    // console.log('mainWindow-msg', global.config, args)
+    // logger.log('mainWindow-msg', global.config, args)
     if (!args.hasOwnProperty('action')) {
         e.reply('mainWindow-msg', global.lang.getMsg(2001, "show-err"))
         return
@@ -724,7 +725,7 @@ ipcMain.on('mainWindow-msg', (e, args) => {
     switch (args.action) {
         case "desktop-ready":
             if (win.webContents.getURL().indexOf('pan-xunlei-com') < 0) {
-                console.log("/////////////global.config.nasURL",
+                logger.log("/////////////global.config.nasURL",
                     global.config.nasURL
                     , getXunleiURL(global.config.nasURL))
                 win.webContents.loadURL(getXunleiURL(global.config.nasURL))
@@ -747,7 +748,7 @@ ipcMain.on('mainWindow-msg', (e, args) => {
                         filePaths: r.filePaths
                     }
                 })
-                console.log('directories selected', r.filePaths)
+                logger.log('directories selected', r.filePaths)
             })
             break
         case "check-update":
@@ -756,13 +757,13 @@ ipcMain.on('mainWindow-msg', (e, args) => {
         case "open-shared-path":
             if (null != global.config.sharedPath && "" !== global.config.sharedPath) {
                 shell.openPath(global.config.sharedPath).then(r => {
-                    console.log("open-shared-path:succ", r, r.toString())
+                    logger.log("open-shared-path:succ", r, r.toString())
                     if (null != r && r.toString().indexOf("Fail") > -1) {
                         showOpenSharedPathFailMessageBox(20005)
                     }
                 }).catch(e => {
                     showOpenSharedPathFailMessageBox(20003)
-                    console.log("open-shared-path:err", e)
+                    logger.log("open-shared-path:err", e)
                 })
             } else {
                 showOpenSharedPathFailMessageBox(20004)
@@ -776,9 +777,9 @@ ipcMain.on('mainWindow-msg', (e, args) => {
             // 接收速度更新并保存
             if (args.data && args.data.speed) {
                 currentSpeed = args.data.speed
-                // console.log(`===== [SPEED UPDATE] =====`)
-                // console.log('SPEED:', currentSpeed)
-                // console.log('===== END SPEED =====')
+                // logger.log(`===== [SPEED UPDATE] =====`)
+                // logger.log('SPEED:', currentSpeed)
+                // logger.log('===== END SPEED =====')
                 // 更新 tray tooltip
                 updateTrayTooltip()
                 // 更新速度浮窗
@@ -809,7 +810,7 @@ ipcMain.on('mainWindow-msg', (e, args) => {
 
 // 在共享目录中查找文件并打开其所在文件夹（选中该文件）
 function handleOpenFileFolder(fileName) {
-    console.log('handleOpenFileFolder:', fileName)
+    logger.log('handleOpenFileFolder:', fileName)
 
     // 情况1：未配置下载文件夹路径
     if (!global.config.sharedPath || global.config.sharedPath === '') {
@@ -830,7 +831,7 @@ function handleOpenFileFolder(fileName) {
 
     // 没有文件名则直接打开共享目录
     if (!fileName) {
-        shell.openPath(sharedPath).catch(e => console.log('open shared path err:', e))
+        shell.openPath(sharedPath).catch(e => logger.log('open shared path err:', e))
         return
     }
 
@@ -838,24 +839,24 @@ function handleOpenFileFolder(fileName) {
     try {
         const target = findFileInDir(sharedPath, fileName, 3)
         if (target && fs.existsSync(target)) {
-            console.log('found target:', target)
+            logger.log('found target:', target)
             // 如果是目录，直接打开该目录；如果是文件，打开其所在目录
             const stat = fs.statSync(target)
             if (stat.isDirectory()) {
-                shell.openPath(target).catch(e => console.log('open dir err:', e))
+                shell.openPath(target).catch(e => logger.log('open dir err:', e))
             } else {
-                shell.openPath(path.dirname(target)).catch(e => console.log('open parent dir err:', e))
+                shell.openPath(path.dirname(target)).catch(e => logger.log('open parent dir err:', e))
             }
         } else {
             // 情况3：下载文件夹存在，但文件未找到（可能已被删除或移动）
-            console.log('file not found:', fileName)
+            logger.log('file not found:', fileName)
             showOpenFolderFailDialog(
                 '文件不存在',
                 '未在下载文件夹中找到「' + fileName + '」，\n该文件可能已被删除或移动。\n\n下载文件夹：' + sharedPath
             )
         }
     } catch (e) {
-        console.log('handleOpenFileFolder error:', e)
+        logger.log('handleOpenFileFolder error:', e)
         showOpenFolderFailDialog('打开文件夹失败', e.message)
     }
 }
@@ -922,7 +923,7 @@ async function showOpenSharedPathFailMessageBox(code) {
             defaultId: 0,
             cancelId: 1
         }).then(r => {
-            console.log('click:', r)
+            logger.log('click:', r)
             if (r.hasOwnProperty('response') && 0 === r.response) {
                 //点击了确认
                 loadDefaultHTML(code, 'show-err', global.lang.getLang('msg', code))
@@ -939,7 +940,7 @@ function setConfig(data = {}) {
         try {
             oldData = JSON.parse(fs.readFileSync(global.configFile))
         } catch (e) {
-            console.log("setConfig:parse old fail")
+            logger.log("setConfig:parse old fail")
         }
     }
     if (typeof (data) != "object") {
@@ -978,7 +979,7 @@ function injectSpeedSniffer() {
     if (!win || win.isDestroyed()) return
     const script = `
         (function() {
-            if (window.__speedHookInstalled) { console.log('[SPEED] hook already installed'); return; }
+            if (window.__speedHookInstalled) { window.logger.log('[SPEED] hook already installed'); return; }
             window.__speedHookInstalled = true;
             // 记录每个运行中任务的速度（id -> bytes/s），跨页面累计
             window.__taskSpeeds = {};
@@ -986,7 +987,7 @@ function injectSpeedSniffer() {
             window.__taskMap = {};
             // 任务过期阈值：超过此时间未在接口响应中出现则清理（跨页面保留）
             window.__taskStaleMs = 5 * 60 * 1000;
-            console.log('[SPEED] Installing drive/v1/tasks API hook...');
+            window.logger.log('[SPEED] Installing drive/v1/tasks API hook...');
 
             function formatSpeed(bytes) {
                 if (bytes >= 1024 * 1024) {
@@ -1049,7 +1050,7 @@ function injectSpeedSniffer() {
                     let total = 0;
                     for (const k in window.__taskSpeeds) total += window.__taskSpeeds[k];
                     const speedStr = formatSpeed(total);
-                    console.log('[SPEED] total bytes/s:', total, '->', speedStr);
+                    window.logger.log('[SPEED] total bytes/s:', total, '->', speedStr);
                     window.postMessage({ type: 'speed-update', speed: speedStr }, '*');
                     // 汇总任务列表
                     const taskList = [];
@@ -1070,7 +1071,7 @@ function injectSpeedSniffer() {
                     const overallProgress = totalSize > 0 ? Math.round(totalProgress / totalSize) : 0;
                     window.postMessage({ type: 'overall-progress-update', progress: overallProgress, taskCount: taskList.length }, '*');
                 } catch (e) {
-                    console.log('[SPEED] parse error:', e.message);
+                    window.logger.log('[SPEED] parse error:', e.message);
                 }
             }
 
@@ -1110,13 +1111,13 @@ function injectSpeedSniffer() {
                 };
             }
 
-            console.log('[SPEED] tasks API hook installed');
+            window.logger.log('[SPEED] tasks API hook installed');
         })();
     `
     win.webContents.executeJavaScript(script).then(() => {
-        console.log('[SPEED] Script injected successfully')
+        logger.log('[SPEED] Script injected successfully')
     }).catch(e => {
-        console.log('[SPEED] Script injection failed:', e)
+        logger.log('[SPEED] Script injection failed:', e)
     })
 }
 
@@ -1177,7 +1178,7 @@ function injectRememberLoginHook() {
                         evt.initEvent('change', true, false);
                         cb.dispatchEvent(evt);
                     }
-                    console.log('[LOGIN] 已自动勾选"保持登录"复选框');
+                    window.logger.log('[LOGIN] 已自动勾选"保持登录"复选框');
                 }
                 return true;
             }
@@ -1187,9 +1188,9 @@ function injectRememberLoginHook() {
         })();
     `
     win.webContents.executeJavaScript(script).then(() => {
-        console.log('[LOGIN] remember-me hook injected')
+        logger.log('[LOGIN] remember-me hook injected')
     }).catch(e => {
-        console.log('[LOGIN] remember-me hook injection failed:', e)
+        logger.log('[LOGIN] remember-me hook injection failed:', e)
     })
 }
 
@@ -1229,11 +1230,11 @@ function updateTrayTooltip() {
 // 创建速度浮窗
 function createSpeedWindow() {
     if (speedWindow && !speedWindow.isDestroyed()) {
-        console.log('[SPEED WINDOW] Already exists, skipping creation')
+        logger.log('[SPEED WINDOW] Already exists, skipping creation')
         return
     }
 
-    console.log('[SPEED WINDOW] Creating speed window...')
+    logger.log('[SPEED WINDOW] Creating speed window...')
     const { BrowserWindow, screen } = require('electron')
     const path = require('path')
 
@@ -1247,11 +1248,11 @@ function createSpeedWindow() {
     if (global.config && global.config.speedWindowPosition) {
         x = global.config.speedWindowPosition.x
         y = global.config.speedWindowPosition.y
-        console.log('[SPEED WINDOW] Using saved position:', x, y)
+        logger.log('[SPEED WINDOW] Using saved position:', x, y)
     } else {
         x = screenWidth - windowWidth - 20
         y = 20
-        console.log('[SPEED WINDOW] Using default position:', x, y)
+        logger.log('[SPEED WINDOW] Using default position:', x, y)
     }
 
     speedWindow = new BrowserWindow({
@@ -1270,7 +1271,8 @@ function createSpeedWindow() {
         useContentSize: true,
         webPreferences: {
             nodeIntegration: true,
-            contextIsolation: false
+            contextIsolation: false,
+            preload: path.join(__dirname, '../speedWindow/preload.js')
         }
     })
 
@@ -1280,7 +1282,7 @@ function createSpeedWindow() {
     speedWindow.loadFile(path.join(__dirname, '../speedWindow/speedWindow.html'))
 
     speedWindow.on('ready-to-show', () => {
-        console.log('[SPEED WINDOW] Ready to show')
+        logger.log('[SPEED WINDOW] Ready to show')
         speedWindow.showInactive()
         speedWindow.setAlwaysOnTop(true, 'screen-saver')
     })
@@ -1309,7 +1311,7 @@ function createSpeedWindow() {
         if (isForegroundFullscreen()) {
             // 前台有全屏应用：隐藏速度窗口
             if (speedWindow.isVisible()) {
-                console.log('[FULLSCREEN] Detected fullscreen app, hiding speed window')
+                logger.log('[FULLSCREEN] Detected fullscreen app, hiding speed window')
                 speedWindow.hide()
             }
             hiddenForFullscreen = true
@@ -1318,7 +1320,7 @@ function createSpeedWindow() {
 
         // 非全屏：若之前因全屏隐藏过，则恢复显示
         if (hiddenForFullscreen) {
-            console.log('[FULLSCREEN] Fullscreen ended, restoring speed window')
+            logger.log('[FULLSCREEN] Fullscreen ended, restoring speed window')
             hiddenForFullscreen = false
             restoreSpeedWindow()
             return
@@ -1338,17 +1340,17 @@ function createSpeedWindow() {
     speedClickThroughActive = true
 
     speedWindow.webContents.on('did-finish-load', () => {
-        console.log('[SPEED WINDOW] HTML loaded successfully')
+        logger.log('[SPEED WINDOW] HTML loaded successfully')
         // 自动打开开发者工具（调试窗口）
        // speedWindow.webContents.openDevTools()
     })
 
     speedWindow.webContents.on('did-fail-load', (e, errorCode, errorDescription) => {
-        console.log('[SPEED WINDOW] Failed to load HTML:', errorCode, errorDescription)
+        logger.log('[SPEED WINDOW] Failed to load HTML:', errorCode, errorDescription)
     })
 
     speedWindow.on('closed', () => {
-        console.log('[SPEED WINDOW] Closed')
+        logger.log('[SPEED WINDOW] Closed')
         if (speedClickThroughTimer) {
             clearInterval(speedClickThroughTimer)
             speedClickThroughTimer = null
@@ -1395,14 +1397,14 @@ module.exports.logout = async () => {
                     url += cookie.domain;
                     url += cookie.path;
                     session.defaultSession.cookies.remove(url, cookie.name, (error) => {
-                        if (error) console.log(`error removing cookie ${cookie.name}`, error);
+                        if (error) logger.log(`error removing cookie ${cookie.name}`, error);
                     })
                 })
             }
             win.webContents.loadURL(global.config.nasURL)
         }
     ).catch(e => {
-        console.log('get cookie fail')
+        logger.log('get cookie fail')
     })
 }
 
@@ -1412,7 +1414,7 @@ async function checkNasLoginStatus(_url) {
         let has_stay_login = false
         let has_syno_cookie_policy = '' //只有远程登陆的时候才有这个
         if (typeof (_url) != "string") {
-            console.log("checkNasLoginStatus:url empty")
+            logger.log("checkNasLoginStatus:url empty")
             return resolve(false)
         }
 
@@ -1423,7 +1425,7 @@ async function checkNasLoginStatus(_url) {
         try {
             host = new URL(_url).hostname
         } catch (e) {
-            console.log("checkNasLoginStatus:invalid url:", _url)
+            logger.log("checkNasLoginStatus:invalid url:", _url)
             return resolve(false)
         }
         let domain = host
@@ -1450,7 +1452,7 @@ async function checkNasLoginStatus(_url) {
                     }
                 })
             }
-            // console.log("checkNasLoginStatus：has_id,has_stay_login,has_syno_cookie_policy", has_id, has_stay_login, has_syno_cookie_policy)
+            // logger.log("checkNasLoginStatus：has_id,has_stay_login,has_syno_cookie_policy", has_id, has_stay_login, has_syno_cookie_policy)
 
             //群晖7.2 有 id 和 stay_login , stay_login='1'的时候才能自动登录
             if (has_id && has_stay_login) {
@@ -1459,7 +1461,7 @@ async function checkNasLoginStatus(_url) {
                 resolve(false)
             }
         }).catch(e => {
-            console.log("cannot get cookie:", domain, e)
+            logger.log("cannot get cookie:", domain, e)
             resolve(false)
         })
     })
@@ -1508,7 +1510,7 @@ function clipboardTick() {
     clipboardCheckOnce()
     const delay = getClipboardPollInterval()
     if (delay === null) {
-        console.log('[CLIPBOARD] polling stopped (window destroyed)')
+        logger.log('[CLIPBOARD] polling stopped (window destroyed)')
         return
     }
     clipboardWatchTimer = setTimeout(clipboardTick, delay)
@@ -1526,10 +1528,10 @@ function restartClipboardPolling(reason) {
     clipboardCheckOnce()
     const delay = getClipboardPollInterval()
     if (delay === null) {
-        console.log('[CLIPBOARD] polling stopped on', reason, '(window destroyed)')
+        logger.log('[CLIPBOARD] polling stopped on', reason, '(window destroyed)')
         return
     }
-    console.log('[CLIPBOARD] polling restarted on', reason, 'interval =', delay, 'ms')
+    logger.log('[CLIPBOARD] polling restarted on', reason, 'interval =', delay, 'ms')
     clipboardWatchTimer = setTimeout(clipboardTick, delay)
 }
 
@@ -1578,9 +1580,9 @@ function waitForSelector(selector, timeoutMs = 15000, intervalMs = 300) {
 
 var addXunLeiTask = function (_txt) {
 
-    console.log("addXunLeiTask:", _txt)
+    logger.log("addXunLeiTask:", _txt)
     if (typeof (_txt) != "undefined" && "" === _txt.trim()) {
-        console.log("addXunLeiTask:txt empty")
+        logger.log("addXunLeiTask:txt empty")
         return
     }
 
@@ -1589,7 +1591,7 @@ var addXunLeiTask = function (_txt) {
 
     // 检查是否在迅雷页面，如果不在，先导航到迅雷页面
     if (false === isInXunleiApp()) {
-        console.log("addXunLeiTask:not in xunlei app, navigating first")
+        logger.log("addXunLeiTask:not in xunlei app, navigating first")
         win.webContents.loadURL(getXunleiURL(global.config.nasURL))
         return
     }
@@ -1604,11 +1606,11 @@ var addXunLeiTask = function (_txt) {
     // 导致 did-finish-load 不触发、待处理任务永远无法恢复。
     try {
         if (!win.isVisible()) {
-            console.log('addXunLeiTask: window not visible, showing')
+            logger.log('addXunLeiTask: window not visible, showing')
             win.show()
         }
         if (win.isMinimized()) {
-            console.log('addXunLeiTask: window minimized, restoring')
+            logger.log('addXunLeiTask: window minimized, restoring')
             win.restore()
         }
         if (!win.isFocused()) {
@@ -1618,7 +1620,7 @@ var addXunLeiTask = function (_txt) {
 
     // 窗口已显示（页面已解除节流），此时刷新不会被后台节流阻塞
     if (wasStale) {
-        console.log('addXunLeiTask: page may be frozen, reloading first')
+        logger.log('addXunLeiTask: page may be frozen, reloading first')
         win.webContents.reload()
         return
     }
@@ -1627,18 +1629,18 @@ var addXunLeiTask = function (_txt) {
     pendingTaskUrl = null
 
     // 等待 .create__task 元素就绪后再点击，避免 Vue 还未渲染完
-    console.log('Waiting for .create__task button...')
+    logger.log('Waiting for .create__task button...')
     waitForSelector('.create__task').then(() => {
-        console.log('.create__task button found, clicking...')
+        logger.log('.create__task button found, clicking...')
         return win.webContents.executeJavaScript(
             `document.querySelector('.create__task').click()`
         )
     }).then(() => {
-        console.log('Button clicked, waiting for .el-textarea__inner...')
+        logger.log('Button clicked, waiting for .el-textarea__inner...')
         // 弹层中的输入框需要再等一下渲染
         return waitForSelector('.el-textarea__inner', 10000)
     }).then(() => {
-        console.log('.el-textarea__inner found, setting value directly...')
+        logger.log('.el-textarea__inner found, setting value directly...')
         // 直接通过原生 value setter 设置文本，并派发 input/change 事件触发 Vue 响应式更新。
         // 不使用 clipboard.writeText + paste() 的原因：
         //   1. 迅雷网页端可能监听 paste 事件并 preventDefault，导致粘贴无效
@@ -1659,9 +1661,9 @@ var addXunLeiTask = function (_txt) {
             })()
         `)
     }).then(() => {
-        console.log('addXunLeiTask completed successfully')
+        logger.log('addXunLeiTask completed successfully')
     }).catch(e => {
-        console.log('addXunLeiTask failed:', e && e.message ? e.message : e)
+        logger.log('addXunLeiTask failed:', e && e.message ? e.message : e)
     })
 }
 
@@ -1674,7 +1676,7 @@ function checkURL(_url) {
         _url.indexOf("ftp://") === 0
     ) {
         let ext = _url.split('/').pop().split('.').pop().split('#').shift().split('?').shift()
-        console.log(_url, true)
+        logger.log(_url, true)
         return true
     }
     if (_url.indexOf("thunder://") === 0
@@ -1682,46 +1684,46 @@ function checkURL(_url) {
         || _url.indexOf("ed2k://") === 0
         || _url.indexOf("magnet:?xt=") === 0
     ) {
-        console.log(_url, true)
+        logger.log(_url, true)
         return true
     } else {
-        console.log(_url, false)
+        logger.log(_url, false)
         return false
     }
 }
 
 function cleanupTimers() {
-    console.log('cleanupTimers called')
+    logger.log('cleanupTimers called')
     if (autoReloadTimer) {
         clearInterval(autoReloadTimer)
         autoReloadTimer = null
-        console.log('autoReloadTimer cleared')
+        logger.log('autoReloadTimer cleared')
     }
     if (clipboardWatchTimer) {
         clearTimeout(clipboardWatchTimer)
         clipboardWatchTimer = null
-        console.log('clipboardWatchTimer cleared')
+        logger.log('clipboardWatchTimer cleared')
     }
     clipboardWatchActive = false
     if (healthCheckTimer) {
         clearInterval(healthCheckTimer)
         healthCheckTimer = null
-        console.log('healthCheckTimer cleared')
+        logger.log('healthCheckTimer cleared')
     }
     if (speedWindowTopmostTimer) {
         clearInterval(speedWindowTopmostTimer)
         speedWindowTopmostTimer = null
-        console.log('speedWindowTopmostTimer cleared')
+        logger.log('speedWindowTopmostTimer cleared')
     }
 }
 
 // 彻底销毁窗口和所有资源
 function destroyWindow() {
-    console.log('destroyWindow called')
+    logger.log('destroyWindow called')
     // 销毁速度浮窗
     destroySpeedWindow()
     if (!win) {
-        console.log('win already null')
+        logger.log('win already null')
         return
     }
     try {
@@ -1731,13 +1733,13 @@ function destroyWindow() {
             isDestroyed = win.isDestroyed()
         } catch (_) {
             // 如果 isDestroyed() 本身抛异常，说明对象已失效
-            console.log('win object already invalid')
+            logger.log('win object already invalid')
             win = null
             return
         }
 
         if (isDestroyed) {
-            console.log('win already destroyed')
+            logger.log('win already destroyed')
             win = null
             return
         }
@@ -1747,7 +1749,7 @@ function destroyWindow() {
             try {
                 win.webContents.stop()
                 win.webContents.closeDevTools()
-                console.log('webContents stopped')
+                logger.log('webContents stopped')
             } catch (_) {}
         }
 
@@ -1757,15 +1759,15 @@ function destroyWindow() {
             if (win.webContents && !win.webContents.isDestroyed()) {
                 win.webContents.removeAllListeners()
             }
-            console.log('all listeners removed')
+            logger.log('all listeners removed')
         } catch (_) {}
 
         // 直接销毁窗口，不等待异步清理
         win.destroy()
-        console.log('window destroyed')
+        logger.log('window destroyed')
         win = null
     } catch (e) {
-        console.log('destroyWindow error:', e)
+        logger.log('destroyWindow error:', e)
         win = null
     }
 }

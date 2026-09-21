@@ -1,4 +1,5 @@
 const {ipcRenderer, clipboard} = window.require('electron')
+const logger = require('../../common/logger')
 
 // 记录右键时提取到的文件名（用于在菜单点击时识别是哪个文件）
 let lastContextFileName = null
@@ -6,19 +7,19 @@ let lastContextFileName = null
 // 监听来自页面的速度更新消息
 window.addEventListener('message', (e) => {
     if (e.data && e.data.type === 'speed-update') {
-        console.log('[SPEED] Received speed:', e.data.speed)
+        logger.log('[SPEED] Received speed:', e.data.speed)
         ipcRenderer.send('mainWindow-msg', {
             action: 'speed-update',
             data: { speed: e.data.speed }
         })
     } else if (e.data && e.data.type === 'task-list-update') {
-        console.log('[TASK LIST] Received tasks:', e.data.tasks.length)
+        logger.log('[TASK LIST] Received tasks:', e.data.tasks.length)
         ipcRenderer.send('mainWindow-msg', {
             action: 'task-list-update',
             data: { tasks: e.data.tasks }
         })
     } else if (e.data && e.data.type === 'overall-progress-update') {
-        console.log('[PROGRESS] Overall progress:', e.data.progress, 'Task count:', e.data.taskCount)
+        logger.log('[PROGRESS] Overall progress:', e.data.progress, 'Task count:', e.data.taskCount)
         ipcRenderer.send('mainWindow-msg', {
             action: 'overall-progress-update',
             data: { progress: e.data.progress, taskCount: e.data.taskCount }
@@ -28,7 +29,7 @@ window.addEventListener('message', (e) => {
 
 // 监听来自速度窗口的任务项打开文件夹请求
 ipcRenderer.on('open-task-folder-from-speed-window', (e, data) => {
-    console.log('[SPEED WINDOW] Open task folder request:', data.taskName)
+    logger.log('[SPEED WINDOW] Open task folder request:', data.taskName)
     // 设置文件名，然后触发打开文件夹操作
     lastContextFileName = data.taskName
     // 发送打开文件夹请求到主进程
@@ -219,7 +220,7 @@ function injectFolderIconHover() {
     var observer = new MutationObserver(scanAndBind)
     observer.observe(document.body, { childList: true, subtree: true })
     scanAndBind()
-    console.log('[FOLDER HOVER] injection started')
+    logger.log('[FOLDER HOVER] injection started')
 }
 
 // 在网页自定义的右键菜单上追加 "打开文件夹" 选项
@@ -238,7 +239,7 @@ function injectContextMenuHandler() {
             // 不调用 preventDefault：让 Chromium 默认菜单被 Electron 的 context-menu 事件接管
         }
         lastContextFileName = extractFileNameFromTarget(e.target)
-        console.log('contextmenu fileName captured:', lastContextFileName)
+        logger.log('contextmenu fileName captured:', lastContextFileName)
     }, true)
 
     // 确保在输入框/文本域内 cmd+v (mac) / ctrl+v (win) 能正常粘贴。
@@ -279,7 +280,7 @@ function injectContextMenuHandler() {
         }
     })
     observer.observe(document.body, { childList: true, subtree: true })
-    console.log('context menu observer started')
+    logger.log('context menu observer started')
 }
 
 // 找到 "查看文件位置" 菜单项并在其后追加 "打开文件夹"
@@ -335,7 +336,7 @@ function tryAppendOpenFolderItem(rootNode) {
     
     // 如果没找到，说明 DOM 结构不同，把信息发回主进程让我们调试
     if (!menuContainer) {
-        console.log('菜单容器未找到，输出DOM结构供调试')
+        logger.log('菜单容器未找到，输出DOM结构供调试')
         const debugInfo = []
         let p = viewLocationItem
         let depth = 0
@@ -350,11 +351,11 @@ function tryAppendOpenFolderItem(rootNode) {
             p = p.parentElement
             depth++
         }
-        console.log('菜单容器未找到，输出DOM结构供调试', debugInfo)
+        logger.log('菜单容器未找到，输出DOM结构供调试', debugInfo)
         return
     }
     
-    console.log('found menu container:', menuContainer, 'menuItem:', menuItem)
+    logger.log('found menu container:', menuContainer, 'menuItem:', menuItem)
 
     // 防止重复添加
     if (menuContainer.querySelector('.nas-xunlei-open-folder-item')) {
@@ -382,7 +383,7 @@ function tryAppendOpenFolderItem(rootNode) {
     newItem.addEventListener('click', (e) => {
         e.stopPropagation()
         e.preventDefault()
-        console.log('open-folder clicked, fileName:', lastContextFileName)
+        logger.log('open-folder clicked, fileName:', lastContextFileName)
 
         ipcRenderer.send('mainWindow-msg', {
             action: 'open-file-folder',
@@ -399,7 +400,7 @@ function tryAppendOpenFolderItem(rootNode) {
     } else {
         menuContainer.appendChild(newItem)
     }
-    console.log('「打开文件夹」 menu item appended')
+    logger.log('「打开文件夹」 menu item appended')
 }
 
 function parseElement(htmlString) {

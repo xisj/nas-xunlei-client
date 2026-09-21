@@ -1,10 +1,11 @@
 const {app, protocol, clipboard, BrowserWindow} = require('electron')
+const logger = require('./common/logger')
 require('./common/global')
 const func = require('./common/func')
 
 // 禁用硬件加速，减少GPU进程残留的可能性
 app.disableHardwareAcceleration()
-console.log('Hardware acceleration disabled')
+logger.log('Hardware acceleration disabled')
 
 // 从参数列表中提取有效的协议链接，过滤掉快捷方式、Electron参数等
 function extractProtocolUrl(args) {
@@ -36,11 +37,11 @@ function extractProtocolUrl(args) {
 app.on('web-contents-created', (event, contents) => {
     contents.on('new-window', (e, url) => {
         e.preventDefault()
-        console.log('new-window prevented:', url)
+        logger.log('new-window prevented:', url)
     })
     // 阻止通过 window.open 创建新窗口
     contents.setWindowOpenHandler(({ url }) => {
-        console.log('window.open prevented:', url)
+        logger.log('window.open prevented:', url)
         return { action: 'deny' }
     })
 })
@@ -55,7 +56,7 @@ const gotTheLock = app.requestSingleInstanceLock(additionalData)
 
 if (!gotTheLock) {
     // 第二实例：不加载任何模块、不创建任何窗口，直接退出
-    console.log('Another instance already running, quitting this one')
+    logger.log('Another instance already running, quitting this one')
     app.quit()
 } else {
     // 主实例：加载菜单、托盘、主窗口模块
@@ -86,24 +87,24 @@ if (!gotTheLock) {
     // 处理协议链接：确保窗口可见并触发添加任务
     function handleProtocolUrl(url) {
         if (!isValidProtocolUrl(url)) {
-            console.log('open-url: not a valid protocol url, ignoring:', url)
+            logger.log('open-url: not a valid protocol url, ignoring:', url)
             return
         }
-        console.log('Handling protocol URL:', url)
+        logger.log('Handling protocol URL:', url)
         // 确保窗口可见、再触发任务，避免显示/隐藏闪烁
         if (mainWindow.win) {
             try {
                 if (!mainWindow.win.isVisible()) {
-                    console.log('open-url: window not visible, showing...')
+                    logger.log('open-url: window not visible, showing...')
                     mainWindow.win.show()
                 }
                 if (mainWindow.win.isMinimized()) {
-                    console.log('open-url: window minimized, restoring...')
+                    logger.log('open-url: window minimized, restoring...')
                     mainWindow.win.restore()
                 }
                 mainWindow.win.focus()
             } catch (e) {
-                console.log('open-url: error showing window:', e)
+                logger.log('open-url: error showing window:', e)
             }
         }
         mainWindow.addXunLeiTask(url)
@@ -112,7 +113,7 @@ if (!gotTheLock) {
     app.on('open-url', (event, url) => {
         // 必须 preventDefault，否则 Electron 可能尝试默认处理
         event.preventDefault()
-        console.log('open-url received:', url, 'isReady:', isReady)
+        logger.log('open-url received:', url, 'isReady:', isReady)
         if (!url) return
         if (!isReady) {
             // 应用尚未就绪（未启动时点击链接），缓存 URL 等 ready 后处理
@@ -124,22 +125,22 @@ if (!gotTheLock) {
     })
 
     app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
-        console.log('second-instance commandLine:', commandLine)
+        logger.log('second-instance commandLine:', commandLine)
 
         // 先确保窗口可见、再触发任务，避免显示/隐藏闪烁
         if (mainWindow.win) {
             try {
                 if (!mainWindow.win.isVisible()) {
-                    console.log('Window not visible, showing...')
+                    logger.log('Window not visible, showing...')
                     mainWindow.win.show()
                 }
                 if (mainWindow.win.isMinimized()) {
-                    console.log('Window minimized, restoring...')
+                    logger.log('Window minimized, restoring...')
                     mainWindow.win.restore()
                 }
                 mainWindow.win.focus()
             } catch (e) {
-                console.log('Error showing window:', e)
+                logger.log('Error showing window:', e)
             }
         }
 
@@ -147,10 +148,10 @@ if (!gotTheLock) {
         const protocolUrl = extractProtocolUrl(commandLine)
 
         if (protocolUrl) {
-            console.log('Valid protocol URL found:', protocolUrl)
+            logger.log('Valid protocol URL found:', protocolUrl)
             mainWindow.addXunLeiTask(protocolUrl)
         } else {
-            console.log('No valid protocol URL in second-instance, ignoring')
+            logger.log('No valid protocol URL in second-instance, ignoring')
         }
     })
 
@@ -166,11 +167,11 @@ if (!gotTheLock) {
             // 此时窗口仍存在但不可见，需要主动 show/focus，否则点击无反应。
             if (mainWindow.win && !mainWindow.win.isDestroyed()) {
                 if (!mainWindow.win.isVisible()) {
-                    console.log('activate: showing hidden window')
+                    logger.log('activate: showing hidden window')
                     mainWindow.win.show()
                 }
                 if (mainWindow.win.isMinimized()) {
-                    console.log('activate: restoring minimized window')
+                    logger.log('activate: restoring minimized window')
                     mainWindow.win.restore()
                 }
                 mainWindow.win.focus()
@@ -187,7 +188,7 @@ if (!gotTheLock) {
 
         // macOS: 处理应用未启动时点击链接缓存的 open-url（可能在 ready 之前触发）
         if (pendingOpenUrls.length > 0) {
-            console.log('Processing pending open-url(s):', pendingOpenUrls.length)
+            logger.log('Processing pending open-url(s):', pendingOpenUrls.length)
             // 延迟执行，确保窗口和页面已初始化（与 Windows argv 处理保持一致）
             setTimeout(() => {
                 pendingOpenUrls.forEach(url => handleProtocolUrl(url))
@@ -197,16 +198,16 @@ if (!gotTheLock) {
 
         // Windows: 检查启动参数，处理通过协议链接启动的情况（程序关闭后点击链接）
         // macOS 的协议 URL 不在 argv 中，而是通过 open-url 事件传递（见上方处理）
-        console.log('Process argv:', process.argv)
+        logger.log('Process argv:', process.argv)
         const protocolUrl = extractProtocolUrl(process.argv)
         if (protocolUrl) {
-            console.log('Launched with protocol URL:', protocolUrl)
+            logger.log('Launched with protocol URL:', protocolUrl)
             // 延迟执行，确保窗口和页面已初始化
             setTimeout(() => {
                 mainWindow.addXunLeiTask(protocolUrl)
             }, 3000)  // 3秒确保页面完全加载和初始化
         } else {
-            console.log('No valid protocol URL found in argv')
+            logger.log('No valid protocol URL found in argv')
         }
     })
 
@@ -216,50 +217,50 @@ if (!gotTheLock) {
     app.on('before-quit', (e) => {
         // 如果已经清理过，直接放行，避免重复清理
         if (cleanupDone) {
-            console.log('before-quit: already cleaned, skipping')
+            logger.log('before-quit: already cleaned, skipping')
             return
         }
 
         // 第一次进入，标记为退出中
         global.__isQuitting = true
         cleanupDone = true
-        console.log('before-quit: cleaning up')
+        logger.log('before-quit: cleaning up')
 
         // 清理定时器
-        try { mainWindow.cleanupTimers() } catch (err) { console.log('cleanupTimers error:', err) }
-        try { updater.stopAutoCheck() } catch (err) { console.log('stopAutoCheck error:', err) }
+        try { mainWindow.cleanupTimers() } catch (err) { logger.log('cleanupTimers error:', err) }
+        try { updater.stopAutoCheck() } catch (err) { logger.log('stopAutoCheck error:', err) }
 
         // 销毁窗口和所有资源
-        try { mainWindow.destroyWindow() } catch (err) { console.log('destroyWindow error:', err) }
+        try { mainWindow.destroyWindow() } catch (err) { logger.log('destroyWindow error:', err) }
 
         // 销毁tray
-        try { tray.destroy() } catch (err) { console.log('tray destroy error:', err) }
+        try { tray.destroy() } catch (err) { logger.log('tray destroy error:', err) }
 
         // 不注销协议处理器，退出后仍应能通过链接唤起客户端
         // 只有在卸载程序时才应该注销协议
 
-        console.log('cleanup completed, exiting in 1s')
+        logger.log('cleanup completed, exiting in 1s')
 
         // 兜底：1秒后强制退出，不再等待
         if (!forceExitTimer) {
             forceExitTimer = setTimeout(() => {
-                console.log('force exit now')
+                logger.log('force exit now')
                 app.exit(0)
             }, 1000)
         }
     })
 
     app.on('will-quit', () => {
-        console.log('will-quit fired')
+        logger.log('will-quit fired')
         try { mainWindow.cleanupTimers() } catch (_) {}
         // 不注销协议处理器
     })
 
     app.on('window-all-closed', () => {
-        console.log('window-all-closed fired')
+        logger.log('window-all-closed fired')
         // 如果已经在退出流程中，不再调用 app.quit()，避免重复触发 before-quit
         if (global.__isQuitting) {
-            console.log('already quitting, skip app.quit()')
+            logger.log('already quitting, skip app.quit()')
             return
         }
         // 不注销协议处理器
@@ -270,6 +271,6 @@ if (!gotTheLock) {
 
     // 额外兜底：监听 quit 事件，确保退出被执行
     app.on('quit', () => {
-        console.log('quit event fired, app exiting')
+        logger.log('quit event fired, app exiting')
     })
 }

@@ -343,6 +343,7 @@
     <div id="task-list"></div>
     <script>
         const { ipcRenderer } = require('electron')
+        const logger = window.logger || console
 
         const speedEl = document.getElementById('speed')
         const labelEl = document.getElementById('label')
@@ -425,7 +426,7 @@
             if (birdVideo) {
                 birdVideo.currentTime = 6
                 isPlayingFromEnd = true
-                birdVideo.play().catch(err => console.log('Video play error:', err))
+                birdVideo.play().catch(err => logger.log('Video play error:', err))
                 // 开始 Canvas 渲染
                 if (videoAnimationId) cancelAnimationFrame(videoAnimationId)
                 processVideoFrame()
@@ -446,7 +447,7 @@
                 // 从6秒播放到结束后，从0秒开始播放到6秒
                 isPlayingFromEnd = false
                 birdVideo.currentTime = 0
-                birdVideo.play().catch(err => console.log('Video play error:', err))
+                birdVideo.play().catch(err => logger.log('Video play error:', err))
             }
         })
 
@@ -603,7 +604,7 @@
         window.addEventListener('mouseup', () => {
             if (isDragging && !moved) {
                 // 未拖动，视为点击
-                console.log('speed window clicked')
+                logger.log('speed window clicked')
                 ipcRenderer.send('speed-window-click')
                 // 点击时播放动画
                 playBirdAnimation()
@@ -670,7 +671,7 @@
             taskListAutoCloseTimer = setTimeout(() => {
                 taskListAutoCloseTimer = null
                 if (isTaskListVisible && !isDragging) {
-                    console.log('task list auto-close: no mouse activity for 10s')
+                    logger.log('task list auto-close: no mouse activity for 10s')
                     hideTaskList()
                 }
             }, 10000)
@@ -717,14 +718,14 @@
         // 鼠标悬停显示任务列表（拖动中不请求）
         speedContainerEl.addEventListener('mouseenter', () => {
             if (isDragging) return
-            console.log('mouseenter, requesting task list')
+            logger.log('mouseenter, requesting task list')
             ipcRenderer.send('get-task-list')
         })
 
         // 监听任务列表更新通知，如果任务列表正在显示则自动刷新
         ipcRenderer.on('task-list-update', () => {
             if (isTaskListVisible && !isDragging) {
-                console.log('task-list-update received, refreshing task list')
+                logger.log('task-list-update received, refreshing task list')
                 ipcRenderer.send('get-task-list')
             }
         })
@@ -748,7 +749,7 @@
         // 接收任务列表响应
         ipcRenderer.on('task-list-response', (e, data) => {
             if (isDragging) return  // 拖动中不展开列表
-            console.log('task-list-response received:', data.tasks?.length)
+            logger.log('task-list-response received:', data.tasks?.length)
             const wasVisible = isTaskListVisible
             renderTaskList(data.tasks)
             taskListEl.classList.add('show')
@@ -782,17 +783,17 @@
         // 点击任务列表：空列表仅关闭列表窗口；有任务则唤起主窗口
         taskListEl.addEventListener('click', () => {
             if (taskListEmpty) {
-                console.log('empty task list clicked, closing')
+                logger.log('empty task list clicked, closing')
                 hideTaskList()
             } else {
-                console.log('task list clicked')
+                logger.log('task list clicked')
                 ipcRenderer.send('speed-window-click')
             }
         })
 
         // 窗口失去焦点时隐藏任务列表
         window.addEventListener('blur', () => {
-            console.log('window blurred, hiding task list')
+            logger.log('window blurred, hiding task list')
             const tl = document.getElementById('task-list')
             tl.classList.remove('show')
             isTaskListVisible = false

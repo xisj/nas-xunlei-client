@@ -2,6 +2,7 @@ const {app} = require('electron')
 const path = require('path')
 const fs = require('fs')
 const func = require('./func')
+const logger = require('./logger')
 
 global.configFile = path.join(path.dirname(__dirname), "/config.json")
 if (app.isPackaged) {
@@ -15,7 +16,7 @@ if (fs.existsSync(global.configFile)) {
         global.config = _j
         global.config.nasURL = func.fixNasURL(global.config.nasURL)
     } catch (e) {
-        console.log("parse config fail")
+        logger.log("parse config fail")
     }
 
 
@@ -25,5 +26,5 @@ global.langDefault = "zh-CN"
 global.lang = require(path.join(path.dirname(__dirname), "/lang/lang"))
 
 module.exports = function () {
-    console.log("global init")
+    logger.log("global init")
 }

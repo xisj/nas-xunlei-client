@@ -1,5 +1,6 @@
 import './style.css'
 
+const logger = window.logger || console
 const app = document.getElementById('app')
 
 app.innerHTML = `
@@ -100,7 +101,7 @@ function setChecked(id, checked) {
 
 // 监听配置消息
 ipcRenderer.on('mainWindow-msg', (e, args) => {
-  console.log('ui2 mainWindow-msg', args)
+  logger.log('ui2 mainWindow-msg', args)
   if (args.action === 'set-config' && args.data) {
     if (args.data.hasOwnProperty('nasURL')) {
       setValue('nas-url', args.data.nasURL)

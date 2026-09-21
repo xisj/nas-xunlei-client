@@ -1,6 +1,7 @@
 const {app, Tray, Menu, nativeImage} = require('electron')
 const path = require('path')
 require('./global')
+const logger = require('./logger')
 const isMac = process.platform === 'darwin'
 
 let tray
@@ -81,9 +82,9 @@ module.exports.destroy = () => {
         if (tray && !tray.isDestroyed()) {
             tray.destroy()
             tray = null
-            console.log('tray destroyed')
+            logger.log('tray destroyed')
         }
     } catch (e) {
-        console.log('destroy tray failed:', e)
+        logger.log('destroy tray failed:', e)
     }
 }

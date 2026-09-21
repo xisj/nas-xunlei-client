@@ -1,6 +1,7 @@
 const {app} = require('electron')
 const fs = require('fs')
 const path = require('path')
+const logger = require('../common/logger')
 let locale = global.langDefault
 let langList = {}
 module.exports.setLang = (localeValue = "") => {
@@ -21,7 +22,7 @@ module.exports.setLang = (localeValue = "") => {
         locale = global.langDefault
         return locale
     }
-    console.log(path.join(__dirname, locale))
+    logger.log(path.join(__dirname, locale))
 }
 
 module.exports.getMsg = (code, action, data = "") => {

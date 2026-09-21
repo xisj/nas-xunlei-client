@@ -1,5 +1,6 @@
 const {app, dialog, shell, BrowserWindow} = require('electron')
 const {autoUpdater} = require('electron-updater')
+const logger = require('./logger')
 const isMac = process.platform === 'darwin'
 
 // 更新检查间隔（24小时）
@@ -23,30 +24,30 @@ function init() {
     autoUpdater.autoInstallAppOnQuit = true
 
     autoUpdater.on('checking-for-update', () => {
-        console.log('[updater] checking for update')
+        logger.log('[updater] checking for update')
     })
 
     autoUpdater.on('update-available', (info) => {
-        console.log('[updater] update available:', info.version)
+        logger.log('[updater] update available:', info.version)
         isUpdateAvailable = true
     })
 
     autoUpdater.on('update-not-available', (info) => {
-        console.log('[updater] current version is latest:', info.version)
+        logger.log('[updater] current version is latest:', info.version)
         isUpdateAvailable = false
     })
 
     autoUpdater.on('error', (err) => {
-        console.log('[updater] error:', err.message)
+        logger.log('[updater] error:', err.message)
         isChecking = false
     })
 
     autoUpdater.on('download-progress', (progress) => {
-        console.log(`[updater] download: ${progress.percent.toFixed(1)}%`)
+        logger.log(`[updater] download: ${progress.percent.toFixed(1)}%`)
     })
 
     autoUpdater.on('update-downloaded', (info) => {
-        console.log('[updater] update downloaded:', info.version)
+        logger.log('[updater] update downloaded:', info.version)
         isChecking = false
         showUpdateDownloadedDialog(info)
     })
@@ -58,12 +59,12 @@ function init() {
  */
 async function checkForUpdates(manual = false) {
     if (isChecking) {
-        console.log('[updater] already checking, skip')
+        logger.log('[updater] already checking, skip')
         return
     }
 
     if (!app.isPackaged) {
-        console.log('[updater] dev mode, skip update check')
+        logger.log('[updater] dev mode, skip update check')
         if (manual) {
             showDevModeDialog()
         }
@@ -92,7 +93,7 @@ async function checkForUpdates(manual = false) {
         }
         isChecking = false
     } catch (err) {
-        console.log('[updater] check failed:', err.message)
+        logger.log('[updater] check failed:', err.message)
         isChecking = false
         if (manual) {
             showCheckErrorDialog(err.message)
@@ -152,7 +153,7 @@ async function checkForUpdatesMacManual(manual) {
         // 有新版本，引导用户手动下载
         showMacUpdateDialog(remoteVersion, release.body || '')
     } catch (err) {
-        console.log('[updater] mac check failed:', err.message)
+        logger.log('[updater] mac check failed:', err.message)
         if (manual) showCheckErrorDialog(err.message)
     }
 }
