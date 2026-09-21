@@ -9,6 +9,23 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 - 打包: `npm run dist:macarm` / `dist:macx64` / `dist:win64` / `dist:win32`
 - UI 构建: `npm run build:ui2` (ui2 子目录)
 
+## 图标 (src/icon.png)
+- `src/icon.png` 同时用于 macOS 打包 (`build.mac.icon`) 与 macOS 窗口图标；Windows 用 `src/icon.ico` / `icon-256.ico`，托盘用 `src/icon-tray.png`。
+- **必须是满幅 (full-bleed) 正方形 1024×1024，且不能有透明像素**。macOS 26 (Tahoe) 对图标分三类处理：
+  1. 满幅方形图 → 自动按官方 squircle 裁切，四角用图像本身颜色补齐（推荐）；
+  2. 带透明留白/非方形画面 → 被缩放后放进系统默认浅灰 squircle 里（"Squircle Jail"，就是"灰底 + 变形"的来源）；
+  3. 使用 Xcode 26 `.icon` / Icon Composer 资源（本项目未使用）。
+- 历史坑：源图曾是 986×790（宽高比 1.248）直接塞进 986×986 画布，Tahoe 把它拉伸填满 squircle → 小鸟被压扁、尾巴被裁、多出灰底。
+- 重新生成：裁掉旧图透明边 → 按比例缩放画面到约 760px 宽 → 贴到 1024×1024 纯色背景 (`#E8EDF2`) 正中 → 保存为 `src/icon.png`。
+
+## Homebrew Cask (Casks/nas-xunlei.rb)
+- 应用未购买 Apple Developer 证书、未公证，官方 homebrew-cask 不会收录（2026-09 起该仓库要求 cask 通过 Gatekeeper 检查），只能用**个人 tap** 分发。
+- 安装命令（需先把 `Casks/nas-xunlei.rb` 放进 `xisj/homebrew-nas-xunlei` 仓库）：`brew tap xisj/nas-xunlei && brew install --cask nas-xunlei`。
+- brew 7 起 `brew install --cask <本地路径/URL>` 被禁用（`HOMEBREW_FORBID_PACKAGES_FROM_PATHS` 默认开启），cask 必须来自 tap。
+- `--no-quarantine` 选项已在 brew 7 移除；未公证应用必须用 `postflight_steps` 里的 `run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/nas迅雷.app"]` 移除 quarantine，否则 Apple Silicon 首次启动报"已损坏"（已实测通过：安装 → 去 quarantine → 启动）。
+- 发新版时需同步更新 `version` 与两架构 `sha256`（GitHub Release 附带的 `nas-xunlei-CHECKSUMS.txt` 里有值）。
+- `auto_updates true`（应用自己用 electron-updater 升级，brew 不会提示过期）。`license` stanza 在本机 brew 7.0.4 运行时不支持（会报 undefined method），不要加。
+
 ## 已知原生依赖
 - `node-window-manager@^2.2.4`: 用于检测前台全屏应用（视频/游戏），源码在 `node_modules/node-window-manager/lib/macos.mm` (macOS) / `windows.cc` (Windows)。
   - **已打补丁**: `initWindow` 与 `getWindowTitle` 增加了空指针保护，防止长时间挂机后 macOS 回收后台进程导致 `NSRunningApplication` 为 nil 进而 `strlen(nullptr)` SIGSEGV。

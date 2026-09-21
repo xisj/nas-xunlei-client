@@ -3,6 +3,33 @@
 
 下载地址： https://github.com/xisj/nas-xunlei-client/releases
 
+## macOS 安装
+
+**方式一：Homebrew（推荐）**
+
+需要 [Homebrew](https://brew.sh)，然后在终端执行：
+
+```
+brew tap xisj/nas-xunlei
+brew trust xisj/nas-xunlei
+brew install --cask nas-xunlei
+```
+
+> `brew trust` 只需执行一次（Homebrew 7 起第三方 tap 默认不被信任）。
+
+应用未购买 Apple 开发者证书、未经公证，cask 安装时会自动移除 quarantine 属性，装完即可直接打开，无需额外操作。升级时用应用内的自动更新即可，也可以随时 `brew upgrade --cask nas-xunlei`。
+
+**方式二：手动安装 dmg**
+
+1. 在 [Releases](https://github.com/xisj/nas-xunlei-client/releases) 下载 `nas-xunlei-<版本>-arm64.dmg`（Intel Mac 用 `x64`）
+2. 若打开提示"已损坏，无法打开"，先执行（把文件名换成实际的）：
+
+```
+xattr -cr ~/Downloads/nas-xunlei-<版本>-arm64.dmg
+```
+
+3. 打开 dmg，把 nas迅雷 拖入「应用程序」
+
 ## 功能
 1. 打开 nas 下载文件夹 ， 可以直接打开下载任务的文件夹
 2. 速度球查看下载进度
