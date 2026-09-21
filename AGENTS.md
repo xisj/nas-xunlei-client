@@ -20,8 +20,10 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 
 ## Homebrew Cask (Casks/nas-xunlei.rb)
 - 应用未购买 Apple Developer 证书、未公证，官方 homebrew-cask 不会收录（2026-09 起该仓库要求 cask 通过 Gatekeeper 检查），只能用**个人 tap** 分发。
-- 安装命令（需先把 `Casks/nas-xunlei.rb` 放进 `xisj/homebrew-nas-xunlei` 仓库）：`brew tap xisj/nas-xunlei && brew install --cask nas-xunlei`。
-- brew 7 起 `brew install --cask <本地路径/URL>` 被禁用（`HOMEBREW_FORBID_PACKAGES_FROM_PATHS` 默认开启），cask 必须来自 tap。
+- 安装命令（需先把 `Casks/nas-xunlei.rb` 放进 `xisj/homebrew-nas-xunlei` 仓库）：
+  - 一条命令（推荐，brew 会自动 tap + 信任该 cask）：`brew install --cask xisj/nas-xunlei/nas-xunlei`
+  - 短名称方式（需先信任一次）：`brew tap xisj/nas-xunlei && brew trust xisj/nas-xunlei && brew install --cask nas-xunlei`
+- brew 7 起 `brew install --cask <本地路径/URL>` 被禁用（`HOMEBREW_FORBID_PACKAGES_FROM_PATHS` 默认开启），cask 必须来自 tap；第三方 tap 默认不信任（`brew trust` / 全名安装自动信任）。
 - `--no-quarantine` 选项已在 brew 7 移除；未公证应用必须用 `postflight_steps` 里的 `run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/nas迅雷.app"]` 移除 quarantine，否则 Apple Silicon 首次启动报"已损坏"（已实测通过：安装 → 去 quarantine → 启动）。
 - 发新版时需同步更新 `version` 与两架构 `sha256`（GitHub Release 附带的 `nas-xunlei-CHECKSUMS.txt` 里有值）。
 - `auto_updates true`（应用自己用 electron-updater 升级，brew 不会提示过期）。`license` stanza 在本机 brew 7.0.4 运行时不支持（会报 undefined method），不要加。

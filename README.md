@@ -7,15 +7,19 @@
 
 **方式一：Homebrew（推荐）**
 
-需要 [Homebrew](https://brew.sh)，然后在终端执行：
+需要 [Homebrew](https://brew.sh)，然后在终端执行一条命令：
 
 ```
-brew tap xisj/nas-xunlei
-brew trust xisj/nas-xunlei
-brew install --cask nas-xunlei
+brew install --cask xisj/nas-xunlei/nas-xunlei
 ```
 
-> `brew trust` 只需执行一次（Homebrew 7 起第三方 tap 默认不被信任）。
+> 为什么用全名？Homebrew 7 出于安全考虑默认不信任第三方 tap（cask 是会在你电脑上执行的脚本）。直接用全名 `xisj/nas-xunlei/nas-xunlei` 安装，相当于声明"我信任这个 cask"，brew 会自动添加 tap 并放行。
+>
+> 想用短名称 `brew install --cask nas-xunlei` 的话，需先执行一次：
+> ```
+> brew tap xisj/nas-xunlei
+> brew trust xisj/nas-xunlei
+> ```
 
 应用未购买 Apple 开发者证书、未经公证，cask 安装时会自动移除 quarantine 属性，装完即可直接打开，无需额外操作。升级时用应用内的自动更新即可，也可以随时 `brew upgrade --cask nas-xunlei`。
 
