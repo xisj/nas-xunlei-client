@@ -194,12 +194,14 @@ ipcMain.on('speed-window-contextmenu', (e, data) => {
                 click: () => {
                     const { shell } = require('electron')
                     if (global.config && global.config.sharedPath) {
-                        if (!fs.existsSync(global.config.sharedPath)) {
-                            showSharedPathMissingDialog(global.config.sharedPath)
-                            return
-                        }
-                        shell.openPath(global.config.sharedPath).catch(err => {
-                            logger.log('open download folder error:', err)
+                        const sp = global.config.sharedPath
+                        // 异步检查：网络挂载上同步 existsSync 可能阻塞主进程
+                        fs.promises.stat(sp).then(() => {
+                            shell.openPath(sp).catch(err => {
+                                logger.log('open download folder error:', err)
+                            })
+                        }).catch(() => {
+                            showSharedPathMissingDialog(sp)
                         })
                     }
                 }
@@ -789,18 +791,21 @@ ipcMain.on('mainWindow-msg', (e, args) => {
             break
         case "open-shared-path":
             if (null != global.config.sharedPath && "" !== global.config.sharedPath) {
-                if (!fs.existsSync(global.config.sharedPath)) {
-                    showSharedPathMissingDialog(global.config.sharedPath)
-                    break
-                }
-                shell.openPath(global.config.sharedPath).then(r => {
-                    logger.log("open-shared-path:succ", r, r.toString())
-                    if (null != r && r.toString().indexOf("Fail") > -1) {
-                        showOpenSharedPathFailMessageBox(20005)
-                    }
-                }).catch(e => {
-                    showOpenSharedPathFailMessageBox(20003)
-                    logger.log("open-shared-path:err", e)
+                const sp = global.config.sharedPath
+                // 异步检查路径是否存在：sharedPath 多为 NAS 网络挂载，
+                // 同步 existsSync 在挂载缓慢/挂起时会阻塞主进程导致整个应用卡死
+                fs.promises.stat(sp).then(() => {
+                    shell.openPath(sp).then(r => {
+                        logger.log("open-shared-path:succ", r, r.toString())
+                        if (null != r && r.toString().indexOf("Fail") > -1) {
+                            showOpenSharedPathFailMessageBox(20005)
+                        }
+                    }).catch(e => {
+                        showOpenSharedPathFailMessageBox(20003)
+                        logger.log("open-shared-path:err", e)
+                    })
+                }).catch(() => {
+                    showSharedPathMissingDialog(sp)
                 })
             } else {
                 showOpenSharedPathFailMessageBox(20004)
@@ -808,7 +813,7 @@ ipcMain.on('mainWindow-msg', (e, args) => {
             break
         case "open-file-folder":
             // 打开文件所在文件夹并选中文件
-            handleOpenFileFolder(args.data && args.data.fileName)
+            handleOpenFileFolder(args.data && args.data.fileName, args.data && args.data.taskState)
             break
         case "speed-update":
             // 接收速度更新并保存
@@ -933,8 +938,13 @@ function showSharedPathMissingDialog(sharedPath) {
 }
 
 // 在共享目录中查找文件并打开其所在文件夹（选中该文件）
-function handleOpenFileFolder(fileName) {
-    logger.log('handleOpenFileFolder:', fileName)
+// 注意：sharedPath 通常是 NAS 网络挂载，所有文件系统操作必须异步执行。
+// 同步 readdir/stat 在挂载缓慢或挂起时会阻塞主进程事件循环，导致整个应用卡死。
+let openFileFolderInFlight = false  // 防重入：上一次扫描未完成时忽略新的点击
+const FILE_SEARCH_TIMEOUT_MS = 30000  // 扫描超时，避免挂载挂起时永久挂起
+
+async function handleOpenFileFolder(fileName, taskState) {
+    logger.log('handleOpenFileFolder:', fileName, 'state:', taskState)
 
     // 情况1：未配置下载文件夹路径
     if (!global.config.sharedPath || global.config.sharedPath === '') {
@@ -942,10 +952,23 @@ function handleOpenFileFolder(fileName) {
         return
     }
 
-    const sharedPath = global.config.sharedPath
+    if (openFileFolderInFlight) {
+        logger.log('handleOpenFileFolder: previous search still running, skip')
+        return
+    }
+    openFileFolderInFlight = true
+    try {
+        await doOpenFileFolder(global.config.sharedPath, fileName, taskState)
+    } finally {
+        openFileFolderInFlight = false
+    }
+}
 
+async function doOpenFileFolder(sharedPath, fileName, taskState) {
     // 情况2：配置的下载文件夹路径不存在（按记录的卷类型区分提示）
-    if (!fs.existsSync(sharedPath)) {
+    try {
+        await fs.promises.stat(sharedPath)
+    } catch (e) {
         showSharedPathMissingDialog(sharedPath)
         return
     }
@@ -956,18 +979,40 @@ function handleOpenFileFolder(fileName) {
         return
     }
 
-    // 在共享目录中查找匹配的文件/文件夹
+    // 在共享目录中查找匹配的文件/文件夹（异步递归，带超时兜底）
+    const TIMEOUT = Symbol('search-timeout')
     try {
-        const target = findFileInDir(sharedPath, fileName, 3)
-        if (target && fs.existsSync(target)) {
+        const target = await Promise.race([
+            findFileInDir(sharedPath, fileName, 3),
+            new Promise(resolve => setTimeout(() => resolve(TIMEOUT), FILE_SEARCH_TIMEOUT_MS))
+        ])
+        if (target === TIMEOUT) {
+            logger.log('file search timeout:', fileName)
+            showOpenFolderFailDialog(
+                '打开文件夹失败',
+                '在下载文件夹中查找文件超时，网络共享可能未连接或响应缓慢。\n\n下载文件夹：' + sharedPath
+            )
+            return
+        }
+        let stat = null
+        if (target) {
+            try {
+                stat = await fs.promises.stat(target)
+            } catch (e) { /* 目标已不可访问，按未找到处理 */ }
+        }
+        if (stat) {
             logger.log('found target:', target)
             // 如果是目录，直接打开该目录；如果是文件，打开其所在目录
-            const stat = fs.statSync(target)
             if (stat.isDirectory()) {
                 shell.openPath(target).catch(e => logger.log('open dir err:', e))
             } else {
                 shell.openPath(path.dirname(target)).catch(e => logger.log('open parent dir err:', e))
             }
+        } else if (taskState === 'ing') {
+            // 任务未完成（下载中/等待/暂停）：文件可能以临时名存在或尚未落盘，
+            // 直接打开下载文件夹，而不是误报"文件不存在"
+            logger.log('file not found but task unfinished, open shared path:', fileName)
+            shell.openPath(sharedPath).catch(e => logger.log('open shared path err:', e))
         } else {
             // 情况3：下载文件夹存在，但文件未找到（可能已被删除或移动）
             logger.log('file not found:', fileName)
@@ -1003,33 +1048,65 @@ function showOpenFolderFailDialog(title, message) {
     })
 }
 
-// 在指定目录下递归查找文件名匹配的文件/文件夹（限制递归深度防止卡死）
-function findFileInDir(dir, fileName, maxDepth = 3) {
+// 下载中文件的常见临时后缀（迅雷 .xltd/.td 及其他下载器惯例）
+const TEMP_FILE_SUFFIXES = ['.xltd', '.td', '.tmp', '.part', '.download', '.crdownload', '.bc!', '.!qb']
+
+// 归一化磁盘文件名用于匹配：去掉隐藏点前缀和临时后缀
+// 如 ".movie.mp4.xltd" → "movie.mp4"
+function normalizeEntryName(name) {
+    let n = name
+    if (n.startsWith('.')) n = n.slice(1)
+    const lower = n.toLowerCase()
+    for (const s of TEMP_FILE_SUFFIXES) {
+        if (lower.endsWith(s)) {
+            n = n.slice(0, n.length - s.length)
+            break
+        }
+    }
+    return n
+}
+
+// 归一化后完全相等：如 "movie.mp4.xltd"、".movie.mp4" 对应任务名 "movie.mp4"
+function strongNameMatch(entryName, fileName) {
+    return normalizeEntryName(entryName) === fileName
+}
+
+// 前缀模糊：一方是另一方的前缀（含归一化后），覆盖截断/追加命名的任务文件夹
+function prefixNameMatch(entryName, fileName) {
+    if (entryName.indexOf(fileName) === 0 || fileName.indexOf(entryName) === 0) return true
+    const normalized = normalizeEntryName(entryName)
+    return normalized.indexOf(fileName) === 0 || fileName.indexOf(normalized) === 0
+}
+
+// 在指定目录下递归查找任务对应的文件/文件夹（限制递归深度防止遍历过深）
+// 必须使用异步 readdir：NAS 网络挂载上同步遍历会把主进程阻塞到卡死。
+// 顺序遍历而非并发：同一时刻最多一个挂起的 readdir，避免占满 libuv 线程池。
+// 匹配优先级：目录 > 文件。多文件（BT）任务的任务名对应文件夹，
+// 任务内文件可能尚未建立，绝不能依赖文件名匹配。
+async function findFileInDir(dir, fileName, maxDepth = 3) {
     if (maxDepth < 0) return null
     let entries
     try {
-        entries = fs.readdirSync(dir, { withFileTypes: true })
+        entries = await fs.promises.readdir(dir, { withFileTypes: true })
     } catch (e) {
         return null
     }
-    // 优先精确匹配当前层
-    for (const entry of entries) {
-        if (entry.name === fileName) {
-            return path.join(dir, entry.name)
-        }
-    }
-    // 模糊匹配（去除可能的扩展名差异）
-    for (const entry of entries) {
-        if (entry.name.indexOf(fileName) === 0 || fileName.indexOf(entry.name) === 0) {
-            return path.join(dir, entry.name)
-        }
-    }
+    const dirs = entries.filter(e => e.isDirectory())
+    const files = entries.filter(e => !e.isDirectory())
+    // 精确目录 → 精确文件 → 归一化精确目录 → 归一化精确文件（.xltd 临时文件）
+    // → 前缀模糊目录 → 前缀模糊文件
+    // 归一化精确优先于前缀模糊：避免任务 "A.file" 的临时文件 "A.file.xltd"
+    // 被恰好同前缀的其他任务文件夹 "A" 抢先命中
+    for (const e of dirs) if (e.name === fileName) return path.join(dir, e.name)
+    for (const e of files) if (e.name === fileName) return path.join(dir, e.name)
+    for (const e of dirs) if (strongNameMatch(e.name, fileName)) return path.join(dir, e.name)
+    for (const e of files) if (strongNameMatch(e.name, fileName)) return path.join(dir, e.name)
+    for (const e of dirs) if (prefixNameMatch(e.name, fileName)) return path.join(dir, e.name)
+    for (const e of files) if (prefixNameMatch(e.name, fileName)) return path.join(dir, e.name)
     // 递归子目录
-    for (const entry of entries) {
-        if (entry.isDirectory()) {
-            const found = findFileInDir(path.join(dir, entry.name), fileName, maxDepth - 1)
-            if (found) return found
-        }
+    for (const e of dirs) {
+        const found = await findFileInDir(path.join(dir, e.name), fileName, maxDepth - 1)
+        if (found) return found
     }
     return null
 }

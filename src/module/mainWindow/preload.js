@@ -3,6 +3,18 @@ const logger = require('../../common/logger')
 
 // 记录右键时提取到的文件名（用于在菜单点击时识别是哪个文件）
 let lastContextFileName = null
+// 记录右键时所在任务的状态（'ing'=未完成 / 'done'=已完成），用于打开文件夹兜底判断
+let lastContextTaskState = null
+
+// 提取任务项状态：ing=未完成(下载中/等待/暂停/校验)，done=已完成
+function getTaskState(item) {
+    if (!item) return null
+    var content = item.querySelector('.task-item__content')
+    if (!content) return null
+    if (content.classList.contains('ing')) return 'ing'
+    if (content.classList.contains('done')) return 'done'
+    return null
+}
 
 // 监听来自页面的速度更新消息
 window.addEventListener('message', (e) => {
@@ -118,19 +130,29 @@ function injectFolderIconHover() {
         + '<path d="M22 11L19 8H2L5 11H22Z" fill="#a0cfff"/>'
         + '</svg>'
 
+    // 提取任务进度百分比。
+    // 注意：.td-progress-bar__inner 是整条轨道，style.width 恒为 100%，不能用它。
+    // 真实进度在状态文本末尾，形如 "3.1GB--:--:--等待中...0%"，取最后一个 xx%。
+    function getTaskProgress(item) {
+        var statusEl = item.querySelector('.task-item__status, .pan-list-item-status')
+        var text = statusEl ? statusEl.textContent : ''
+        var matches = text.match(/\d+(?:\.\d+)?\s*%/g)
+        if (!matches || matches.length === 0) return 0
+        var v = parseFloat(matches[matches.length - 1])
+        return isNaN(v) ? 0 : v
+    }
+
     // 判断任务项是否符合显示文件夹图标的条件
     function isTaskQualified(item) {
         var content = item.querySelector('.task-item__content')
         if (!content) return false
 
-        // 下载中：进度 > 0，或处于"校验中"/"验证中"（此时进度条可能显示0%但文件已存在）
+        // 下载中：进度 >= 1%（<1% 时文件基本未落盘，无可打开内容），
+        // 或处于"校验中"/"验证中"（此时进度条可能显示0%但文件已存在）
         if (content.classList.contains('ing')) {
-            var progressInner = item.querySelector('.td-progress-bar__inner')
-            var width = progressInner ? (progressInner.style.width || '0%') : '0%'
-            var percent = parseInt(width.replace('%', ''), 10)
-            if (percent > 0) return true
+            if (getTaskProgress(item) >= 1) return true
             // 校验中/验证中：文件已下载完成，应允许打开
-            var statusEl = item.querySelector('.task-item__status')
+            var statusEl = item.querySelector('.task-item__status, .pan-list-item-status')
             var statusText = statusEl ? statusEl.textContent.trim() : ''
             if (statusText.indexOf('校验') >= 0 || statusText.indexOf('验证') >= 0) return true
             return false
@@ -162,8 +184,18 @@ function injectFolderIconHover() {
         item.__folderHoverBound = true
 
         item.addEventListener('mouseenter', function() {
-            if (!isTaskQualified(item)) return
             var iconContainer = item.querySelector('.task-item__icon')
+            if (!isTaskQualified(item)) {
+                // 列表可能复用 DOM 节点：不合格时恢复残留状态
+                if (iconContainer) {
+                    var origImg = iconContainer.querySelector('img')
+                    var staleIcon = iconContainer.querySelector('.nas-folder-hover-icon')
+                    if (origImg) origImg.style.display = ''
+                    if (staleIcon) staleIcon.style.display = 'none'
+                }
+                item.style.cursor = ''
+                return
+            }
             if (!iconContainer) return
             var originalImg = iconContainer.querySelector('img')
             var folderIconEl = iconContainer.querySelector('.nas-folder-hover-icon')
@@ -182,7 +214,7 @@ function injectFolderIconHover() {
                     var fileName = getTaskFileName(item)
                     ipcRenderer.send('mainWindow-msg', {
                         action: 'open-file-folder',
-                        data: { fileName: fileName }
+                        data: { fileName: fileName, taskState: getTaskState(item) }
                     })
                 })
                 iconContainer.appendChild(folderIconEl)
@@ -239,6 +271,8 @@ function injectContextMenuHandler() {
             // 不调用 preventDefault：让 Chromium 默认菜单被 Electron 的 context-menu 事件接管
         }
         lastContextFileName = extractFileNameFromTarget(e.target)
+        var taskItem = e.target && e.target.closest ? e.target.closest('.task-item') : null
+        lastContextTaskState = getTaskState(taskItem)
         logger.log('contextmenu fileName captured:', lastContextFileName)
     }, true)
 
@@ -387,7 +421,7 @@ function tryAppendOpenFolderItem(rootNode) {
 
         ipcRenderer.send('mainWindow-msg', {
             action: 'open-file-folder',
-            data: { fileName: lastContextFileName }
+            data: { fileName: lastContextFileName, taskState: lastContextTaskState }
         })
 
         // 关闭菜单

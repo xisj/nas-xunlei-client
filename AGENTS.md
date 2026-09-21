@@ -42,3 +42,14 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 - v1.3.3: 同一崩溃复现。源码 `macos.mm` 补丁仍在，但打包出的 arm64 `addon.node` 实际是**未打补丁的旧二进制**（`otool` 反汇编显示 `initWindow` 内 `bundleURL→path→UTF8String→Napi::String::New` 之间无任何 `cbz` 空检查，崩溃偏移 `initWindow+620` 正对应 `Napi::String::New` 调用点）。
   - 根因: 之前打补丁后未强制重建 arm64 原生模块，`electron-builder` 的 `@electron/rebuild(buildFromSource=false)` 沿用了 `build/Release/` 下未打补丁的缓存二进制。JS 层 `active.path` 保护无法拦截，因为崩溃发生在原生 `initWindow` 内部、早于返回值。
   - 修复: `npx @electron/rebuild -f -w node-window-manager -a arm64`（及 `extract-file-icon`）强制从已打补丁源码重新编译，再 `npm run dist:macarm` 重新打包。反汇编验证新二进制含 `cbz x23`(app nil 检查)、`cbz x0`(bundleURL/path nil 检查)、`csel x1,x23,x0,eq`(UTF8String nil 回退到 "")。
+
+## 卡死修复历史
+- 点击"等待下载"任务左侧文件夹图标 → 整个应用卡死（100% 复现）。
+  - 根因: `handleOpenFileFolder` → `findFileInDir` 用**同步** `fs.readdirSync` 在 `sharedPath`（NAS 网络挂载）上递归扫描 3 层。等待任务文件尚不存在 → 精确/模糊匹配落空 → 全量遍历整棵目录树，同步网络 I/O 直接阻塞主进程事件循环。已下载任务文件在顶层即命中早退，所以不卡。
+  - 修复: 该链路全部改异步（`fs.promises` 顺序遍历、同一时刻最多一个挂起 readdir 避免占满 libuv 线程池）；加防重入 `openFileFolderInFlight` 与 30s 扫描超时；`open-shared-path`、速度球菜单"打开下载文件夹"两处的 `fs.existsSync(sharedPath)` 同样改异步。
+  - **原则**: 主进程中禁止对 `sharedPath`（或任何 `/Volumes/` 下可能为网络挂载的路径）使用同步 fs 调用（existsSync/readdirSync/statSync/readFileSync），一律 `fs.promises`。
+- 下载中任务点文件夹图标误报"文件不存在"。
+  - 原因: 未完成任务文件以临时名存在（`name.mkv.xltd`、`.name.tmp` 等）或尚未落盘，文件名匹配不上。
+  - 修复: `findFileInDir` 匹配分级（`normalizeEntryName` 去前导隐藏点 + 去临时后缀 `.xltd/.td/.tmp/.part/.download/.crdownload/.bc!/.!qb`）；preload 传 `taskState`（`ing`/`done`，取 `.task-item__content` class），未完成任务找不到文件时直接打开 `sharedPath`，已完成任务才弹"文件不存在"。
+  - **匹配顺序**: 每层按 精确目录 → 精确文件 → 归一化精确目录 → 归一化精确文件 → 前缀模糊目录 → 前缀模糊文件。目录优先：多文件（BT）任务的任务名是文件夹，任务内文件可能尚未建立，不能靠文件名匹配；归一化精确（`A.file.xltd` 对任务 `A.file`）须优先于前缀模糊（碰巧同前缀的目录 `A`），否则单文件任务会误开别人的文件夹。
+- 文件夹图标显示门槛（preload `isTaskQualified`/`getTaskProgress`）：**只读进度条宽度**（`.td-progress-bar__inner` 的 `style.width`，`parseFloat`）——等待中任务进度条是灰色的（宽度 0 或元素缺失 → 视为 0）。**不要从状态/其他文本抓 %**，无关百分比曾导致 0% 等待任务误显示图标（曾尝试用 `drive/v1/tasks` 接口 `file_name` 判断，过度设计已回退）。进度 ≥1% 或状态含"校验/验证"才显示图标；等待中但进度 ≥1% 的任务部分文件已落盘，仍可打开（曾按"等待"文本一刀切被否）。`mouseenter` 判定不合格时会主动恢复残留图标，防止列表复用 DOM 节点导致图标错挂。
