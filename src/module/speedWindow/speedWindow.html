@@ -732,6 +732,16 @@
             }
         })
 
+        // 主进程轮询检测到光标完全离开浮窗超过 1 秒 → 收起任务列表。
+        // 不走 DOM mouseleave：透明区域处于点击穿透状态时事件转发不可靠，
+        // 由主进程按坐标判断才稳定
+        ipcRenderer.on('speed-window-mouse-leave', () => {
+            if (isTaskListVisible && !isDragging) {
+                logger.log('cursor left window for >1s, hiding task list')
+                hideTaskList()
+            }
+        })
+
         // body 上下内边距（与 CSS padding 对应：top 20 + bottom 30）
         const TOP_PAD = 20
         const BOTTOM_PAD = 30   // 底部留白，避免阴影被裁切

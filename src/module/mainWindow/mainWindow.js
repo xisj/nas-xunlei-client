@@ -39,6 +39,8 @@ let speedInteractiveRects = []  // 浮窗内可交互区域（胶囊/任务列�
 let speedWindowDragging = false  // 浮窗是否正在拖拽（拖拽期间禁止穿透，避免松手丢失）
 let speedClickThroughTimer = null  // 浮窗点击穿透轮询定时器
 let speedClickThroughActive = false  // 当前鼠标是否位于可交互区域（false 表示窗口处于穿透/忽略鼠标状态）
+let speedCursorOutsideSince = null  // 光标完全离开浮窗边界的时间戳（null=光标在窗口内）
+let speedMouseLeaveNotified = false  // 本次离开是否已通知渲染进程收起任务列表
 
 // 检测前台窗口是否为全屏应用（全屏视频/全屏游戏等）
 // 原理：取前台活动窗口，若其矩形完全覆盖所在显示器的整个屏幕（含任务栏区域），
@@ -318,8 +320,10 @@ function updateSpeedClickThrough() {
     const [winX, winY] = speedWindow.getPosition()
     const [winW, winH] = speedWindow.getSize()
 
+    const insideWindow = cursor.x >= winX && cursor.x < winX + winW
+        && cursor.y >= winY && cursor.y < winY + winH
     let interactive = false
-    if (cursor.x >= winX && cursor.x < winX + winW && cursor.y >= winY && cursor.y < winY + winH) {
+    if (insideWindow) {
         for (const r of speedInteractiveRects) {
             const rx = winX + r.x
             const ry = winY + r.y
@@ -334,6 +338,20 @@ function updateSpeedClickThrough() {
     // 被系统重置，若依赖本地标志跳过重复调用，原生状态与本地状态会失同步
     speedClickThroughActive = interactive
     speedWindow.setIgnoreMouseEvents(!interactive, { forward: true })
+
+    // 光标完全离开浮窗超过 1 秒后，通知渲染进程收起任务列表。
+    // 不走 DOM mouseleave：透明区域处于点击穿透状态时 mousemove/mouseleave
+    // 事件转发不可靠（Windows 上 forward 不生效），轮询坐标才稳定。
+    if (insideWindow) {
+        speedCursorOutsideSince = null
+        speedMouseLeaveNotified = false
+    } else {
+        if (speedCursorOutsideSince === null) speedCursorOutsideSince = Date.now()
+        if (!speedMouseLeaveNotified && Date.now() - speedCursorOutsideSince >= 1000) {
+            speedMouseLeaveNotified = true
+            speedWindow.webContents.send('speed-window-mouse-leave')
+        }
+    }
 }
 
 function getXunleiURL(_nasURL) {
@@ -1387,6 +1405,8 @@ function destroySpeedWindow() {
     }
     speedWindowDragging = false
     speedInteractiveRects = []
+    speedCursorOutsideSince = null
+    speedMouseLeaveNotified = false
     if (speedWindow && !speedWindow.isDestroyed()) {
         speedWindow.destroy()
         speedWindow = null
