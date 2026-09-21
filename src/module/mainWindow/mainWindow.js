@@ -3,6 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const url = require('url')
 const net = require('net')
+const {exec} = require('child_process')
 const func = require('../../common/func')
 require('../../common/global')
 const logger = require('../../common/logger')
@@ -193,6 +194,10 @@ ipcMain.on('speed-window-contextmenu', (e, data) => {
                 click: () => {
                     const { shell } = require('electron')
                     if (global.config && global.config.sharedPath) {
+                        if (!fs.existsSync(global.config.sharedPath)) {
+                            showSharedPathMissingDialog(global.config.sharedPath)
+                            return
+                        }
                         shell.openPath(global.config.sharedPath).catch(err => {
                             logger.log('open download folder error:', err)
                         })
@@ -755,9 +760,15 @@ ipcMain.on('mainWindow-msg', (e, args) => {
 
             break
         case "confirm-config":
-            if (setConfig(args.data)) {
-                win.loadURL(global.config.nasURL)
-            }
+            // 配置时探测下载文件夹所在卷的类型（只读 mount 表，几十毫秒），
+            // 结果随 config 存入 sharedMount，供路径不存在时区分报错文案；
+            // 路径为空或探测失败则清掉旧记录，避免陈旧类型误导
+            detectSharedPathMountInfo(args.data.sharedPath).then(info => {
+                args.data.sharedMount = info
+                if (setConfig(args.data)) {
+                    win.loadURL(global.config.nasURL)
+                }
+            })
 
             break
         case "confirm-shared-path":
@@ -778,6 +789,10 @@ ipcMain.on('mainWindow-msg', (e, args) => {
             break
         case "open-shared-path":
             if (null != global.config.sharedPath && "" !== global.config.sharedPath) {
+                if (!fs.existsSync(global.config.sharedPath)) {
+                    showSharedPathMissingDialog(global.config.sharedPath)
+                    break
+                }
                 shell.openPath(global.config.sharedPath).then(r => {
                     logger.log("open-shared-path:succ", r, r.toString())
                     if (null != r && r.toString().indexOf("Fail") > -1) {
@@ -830,6 +845,93 @@ ipcMain.on('mainWindow-msg', (e, args) => {
     }
 })
 
+// 网络文件系统类型（NAS 共享等），用于下载文件夹不存在时区分报错文案
+const NETWORK_FS_TYPES = new Set(['smbfs', 'nfs', 'afpfs', 'webdav', 'sshfs', 'ftpfs', 'unc'])
+
+// 解析 mount 输出，找到 dirPath 所在挂载点及其文件系统类型。
+// mount 行格式: "<dev> on <dir> (<type>, <flags>...)"，
+// dir 中空格等特殊字符以八进制 \NNN 转义（如 \040）。
+function parseMountTable(mountOutput, dirPath) {
+    let best = null
+    for (const line of mountOutput.split('\n')) {
+        const m = line.match(/ on (.*) \(([^,)]+)/)
+        if (!m) continue
+        const mountPoint = m[1].replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
+        const fsType = m[2].trim()
+        const prefix = mountPoint.endsWith('/') ? mountPoint : mountPoint + '/'
+        if (dirPath === mountPoint || dirPath.startsWith(prefix)) {
+            if (!best || mountPoint.length > best.mountPoint.length) {
+                best = {fsType, mountPoint}
+            }
+        }
+    }
+    return best
+}
+
+// 探测下载文件夹所在卷的类型（只读 mount 表，不触碰文件系统，不会阻塞）。
+// 结果写入 config.sharedMount，供路径不存在时给出针对性提示。
+function detectSharedPathMountInfo(dirPath) {
+    return new Promise(resolve => {
+        if (typeof dirPath !== 'string' || !dirPath) {
+            resolve(null)
+            return
+        }
+        // Windows UNC 路径 \\host\share\... 天然是网络共享，无需 mount 表
+        if (dirPath.startsWith('\\\\') || dirPath.startsWith('//')) {
+            resolve({fsType: 'unc', mountPoint: dirPath.split(/[\\/]+/).filter(Boolean).slice(0, 2).join('/')})
+            return
+        }
+        exec('mount', {timeout: 5000}, (err, stdout) => {
+            if (err || !stdout) {
+                resolve(null)
+                return
+            }
+            const info = parseMountTable(stdout, dirPath)
+            // 只匹配到根挂载（如 /），说明路径在系统盘上 → 本地目录。
+            // /Volumes/ 下的路径若无独立挂载条目，说明卷未挂载（NAS 或外置盘都可能），
+            // 记录为 unmounted-volume 以便提示"卷未连接"而非"文件夹被删除"。
+            if (info && info.mountPoint === '/' && dirPath.startsWith('/Volumes/')) {
+                resolve({fsType: 'unmounted-volume', mountPoint: null})
+                return
+            }
+            resolve(info)
+        })
+    })
+}
+
+// 按配置时记录的卷类型给出针对性提示：
+// 网络共享未挂载 / 卷未挂载（可能是 NAS 或外置盘）/ 本地路径被删移或未插盘 / 未知兜底
+function showSharedPathMissingDialog(sharedPath) {
+    const fsType = global.config && global.config.sharedMount && global.config.sharedMount.fsType
+    if (fsType && NETWORK_FS_TYPES.has(fsType)) {
+        showOpenFolderFailDialog(
+            '下载文件夹未挂载',
+            '下载文件夹位于网络共享（NAS）上，当前该共享未连接。\n\n'
+            + '请先在「访达」中连接 NAS（确保 NAS 已开机、共享服务正常），然后重试。\n\n'
+            + '路径：' + sharedPath
+        )
+    } else if (fsType === 'unmounted-volume'
+        || (!fsType && sharedPath.startsWith('/Volumes/'))) {
+        showOpenFolderFailDialog(
+            '下载文件夹未挂载',
+            '下载文件夹所在的卷未挂载（可能是 NAS 共享或外置磁盘未连接）。\n\n'
+            + '请先连接对应的共享或磁盘后重试。\n\n'
+            + '路径：' + sharedPath
+        )
+    } else if (fsType) {
+        showOpenFolderFailDialog(
+            '下载文件夹不存在',
+            '下载文件夹已被删除或移动，或其所在的磁盘未连接。\n\n'
+            + '路径：' + sharedPath + '\n\n请检查设置中的共享文件夹路径是否正确。'
+        )
+    } else {
+        showOpenFolderFailDialog(
+            '下载文件夹不存在',
+            '配置的下载文件夹路径不存在：\n\n' + sharedPath + '\n\n请检查设置中的共享文件夹路径是否正确。'
+        )
+    }
+}
+
 // 在共享目录中查找文件并打开其所在文件夹（选中该文件）
 function handleOpenFileFolder(fileName) {
     logger.log('handleOpenFileFolder:', fileName)
@@ -842,12 +944,9 @@ function handleOpenFileFolder(fileName) {
 
     const sharedPath = global.config.sharedPath
 
-    // 情况2：配置的下载文件夹路径不存在
+    // 情况2：配置的下载文件夹路径不存在（按记录的卷类型区分提示）
     if (!fs.existsSync(sharedPath)) {
-        showOpenFolderFailDialog(
-            '下载文件夹不存在',
-            '配置的下载文件夹路径不存在：\n\n' + sharedPath + '\n\n请检查设置中的共享文件夹路径是否正确。'
-        )
+        showSharedPathMissingDialog(sharedPath)
         return
     }
 
