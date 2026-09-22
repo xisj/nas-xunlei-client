@@ -3,18 +3,6 @@ const logger = require('../../common/logger')
 
 // 记录右键时提取到的文件名（用于在菜单点击时识别是哪个文件）
 let lastContextFileName = null
-// 记录右键时所在任务的状态（'ing'=未完成 / 'done'=已完成），用于打开文件夹兜底判断
-let lastContextTaskState = null
-
-// 提取任务项状态：ing=未完成(下载中/等待/暂停/校验)，done=已完成
-function getTaskState(item) {
-    if (!item) return null
-    var content = item.querySelector('.task-item__content')
-    if (!content) return null
-    if (content.classList.contains('ing')) return 'ing'
-    if (content.classList.contains('done')) return 'done'
-    return null
-}
 
 // 监听来自页面的速度更新消息
 window.addEventListener('message', (e) => {
@@ -214,7 +202,7 @@ function injectFolderIconHover() {
                     var fileName = getTaskFileName(item)
                     ipcRenderer.send('mainWindow-msg', {
                         action: 'open-file-folder',
-                        data: { fileName: fileName, taskState: getTaskState(item) }
+                        data: { fileName: fileName }
                     })
                 })
                 iconContainer.appendChild(folderIconEl)
@@ -271,8 +259,6 @@ function injectContextMenuHandler() {
             // 不调用 preventDefault：让 Chromium 默认菜单被 Electron 的 context-menu 事件接管
         }
         lastContextFileName = extractFileNameFromTarget(e.target)
-        var taskItem = e.target && e.target.closest ? e.target.closest('.task-item') : null
-        lastContextTaskState = getTaskState(taskItem)
         logger.log('contextmenu fileName captured:', lastContextFileName)
     }, true)
 
@@ -421,7 +407,7 @@ function tryAppendOpenFolderItem(rootNode) {
 
         ipcRenderer.send('mainWindow-msg', {
             action: 'open-file-folder',
-            data: { fileName: lastContextFileName, taskState: lastContextTaskState }
+            data: { fileName: lastContextFileName }
         })
 
         // 关闭菜单

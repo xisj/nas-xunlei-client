@@ -45,11 +45,7 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 
 ## 卡死修复历史
 - 点击"等待下载"任务左侧文件夹图标 → 整个应用卡死（100% 复现）。
-  - 根因: `handleOpenFileFolder` → `findFileInDir` 用**同步** `fs.readdirSync` 在 `sharedPath`（NAS 网络挂载）上递归扫描 3 层。等待任务文件尚不存在 → 精确/模糊匹配落空 → 全量遍历整棵目录树，同步网络 I/O 直接阻塞主进程事件循环。已下载任务文件在顶层即命中早退，所以不卡。
-  - 修复: 该链路全部改异步（`fs.promises` 顺序遍历、同一时刻最多一个挂起 readdir 避免占满 libuv 线程池）；加防重入 `openFileFolderInFlight` 与 30s 扫描超时；`open-shared-path`、速度球菜单"打开下载文件夹"两处的 `fs.existsSync(sharedPath)` 同样改异步。
-  - **原则**: 主进程中禁止对 `sharedPath`（或任何 `/Volumes/` 下可能为网络挂载的路径）使用同步 fs 调用（existsSync/readdirSync/statSync/readFileSync），一律 `fs.promises`。
-- 下载中任务点文件夹图标误报"文件不存在"。
-  - 原因: 未完成任务文件以临时名存在（`name.mkv.xltd`、`.name.tmp` 等）或尚未落盘，文件名匹配不上。
-  - 修复: `findFileInDir` 匹配分级（`normalizeEntryName` 去前导隐藏点 + 去临时后缀 `.xltd/.td/.tmp/.part/.download/.crdownload/.bc!/.!qb`）；preload 传 `taskState`（`ing`/`done`，取 `.task-item__content` class），未完成任务找不到文件时直接打开 `sharedPath`，已完成任务才弹"文件不存在"。
-  - **匹配顺序**: 每层按 精确目录 → 精确文件 → 归一化精确目录 → 归一化精确文件 → 前缀模糊目录 → 前缀模糊文件。目录优先：多文件（BT）任务的任务名是文件夹，任务内文件可能尚未建立，不能靠文件名匹配；归一化精确（`A.file.xltd` 对任务 `A.file`）须优先于前缀模糊（碰巧同前缀的目录 `A`），否则单文件任务会误开别人的文件夹。
-- 文件夹图标显示门槛（preload `isTaskQualified`/`getTaskProgress`）：**只读进度条宽度**（`.td-progress-bar__inner` 的 `style.width`，`parseFloat`）——等待中任务进度条是灰色的（宽度 0 或元素缺失 → 视为 0）。**不要从状态/其他文本抓 %**，无关百分比曾导致 0% 等待任务误显示图标（曾尝试用 `drive/v1/tasks` 接口 `file_name` 判断，过度设计已回退）。进度 ≥1% 或状态含"校验/验证"才显示图标；等待中但进度 ≥1% 的任务部分文件已落盘，仍可打开（曾按"等待"文本一刀切被否）。`mouseenter` 判定不合格时会主动恢复残留图标，防止列表复用 DOM 节点导致图标错挂。
+  - 根因: `handleOpenFileFolder` → 递归扫描用**同步** `fs.readdirSync` 在 `sharedPath`（NAS 网络挂载）上扫 3 层。等待任务文件尚不存在 → 匹配落空 → 全量遍历整棵目录树，同步网络 I/O 直接阻塞主进程事件循环。
+  - **最终方案（v1.3.11）**: 彻底放弃文件名匹配/递归扫描——`handleOpenFileFolder` 只做 `stat(sharedPath)`（不存在 → 按卷类型弹窗）→ `fileName` 顶层精确命中（一次 stat）则 `shell.showItemInFolder` 选中，否则直接 `shell.openPath(sharedPath)`，openPath 失败 → 弹窗。曾尝试过异步化扫描/匹配分级/按任务状态区分深度等方案，均因 NAS 延迟和迅雷临时文件命名不可靠而放弃。
+  - **原则**: 主进程中禁止对 `sharedPath`（或任何 `/Volumes/` 下可能为网络挂载的路径）使用同步 fs 调用（existsSync/readdirSync/statSync/readFileSync），一律 `fs.promises`；`open-shared-path`、速度球菜单"打开下载文件夹"的 existsSync 已是异步。
+- 文件夹图标显示门槛（preload `isTaskQualified`/`getTaskProgress`）：进度取**状态文本末尾的 `xx%`**（`.task-item__status` 或 `.pan-list-item-status` 里最后一个百分数）——`.td-progress-bar__inner` 的 `style.width` 恒为 100%（是轨道不是填充），不能用它。进度 ≥1% 或状态含"校验/验证"才显示图标；等待中但进度 ≥1% 的任务部分文件已落盘，仍可打开（曾按"等待"文本一刀切被否）。`mouseenter` 判定不合格时会主动恢复残留图标，防止列表复用 DOM 节点导致图标错挂。
