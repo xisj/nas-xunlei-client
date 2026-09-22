@@ -39,9 +39,16 @@ ipcRenderer.on('open-task-folder-from-speed-window', (e, data) => {
 })
 
 // 从右键事件的 target 向上查找，提取文件名
-// 优先策略：找带 title 属性的元素（迅雷通常用 title 显示完整文件名）
+// 优先策略：若右键点在任务项内，直接取任务名（.pan-list-item-name）；
+// 否则向上找带 title 属性的元素（迅雷通常用 title 显示完整文件名）
 function extractFileNameFromTarget(target) {
     if (!target) return null
+    var item = target.closest ? target.closest('.task-item') : null
+    if (item) {
+        var nameEl = item.querySelector('.pan-list-item-name a, .pan-list-item-name')
+        var t = nameEl ? nameEl.textContent.trim() : ''
+        if (t.length > 0 && t.length < 500) return t
+    }
     let node = target
     let depth = 0
     // 向上最多查找 15 层

@@ -937,8 +937,59 @@ function showSharedPathMissingDialog(sharedPath) {
     }
 }
 
-// 打开下载文件夹。不做文件名递归匹配：NAS 网络挂载上扫描慢且不可靠，
-// 文件名在顶层精确命中（一次 stat）就选中该文件，否则直接打开下载文件夹。
+// 打开任务对应的下载文件夹。
+// 不做递归扫描（NAS 上慢且不可靠），只对 sharedPath 顶层做一次 readdir：
+// 匹配到目录则打开该任务文件夹，匹配到文件则在 Finder 中选中该文件，
+// 都没匹配到才直接打开下载文件夹。
+const TEMP_FILE_SUFFIXES = ['.xltd', '.td', '.tmp', '.part', '.download', '.crdownload', '.bc!', '.!qb']
+
+// 归一化文件名用于匹配：去掉前导隐藏点和迅雷临时后缀
+function normalizeEntryName(name) {
+    let n = name
+    while (n.startsWith('.')) n = n.slice(1)
+    const lower = n.toLowerCase()
+    for (const s of TEMP_FILE_SUFFIXES) {
+        if (lower.endsWith(s)) return n.slice(0, n.length - s.length)
+    }
+    return n
+}
+
+// 在 sharedPath 顶层条目里匹配 fileName，返回 {path, isDir} 或 null。
+// 目录优先于文件；精确 > 归一化精确 > 前缀。不匹配深层递归。
+async function findTopLevelTarget(sharedPath, fileName) {
+    if (!fileName) return null
+    const wanted = fileName.trim().toLowerCase()
+    const wantedNorm = normalizeEntryName(fileName.trim()).toLowerCase()
+    let entries
+    try {
+        // 15s 超时：挂载异常时不至于永久无响应
+        entries = await Promise.race([
+            fs.promises.readdir(sharedPath, { withFileTypes: true }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('readdir timeout')), 15000))
+        ])
+    } catch (e) {
+        logger.log('readdir sharedPath failed:', e)
+        return null
+    }
+    let best = null, bestScore = -1
+    for (const e of entries) {
+        const lower = e.name.toLowerCase()
+        const norm = normalizeEntryName(e.name).toLowerCase()
+        let score = 0
+        if (lower === wanted) score = 4
+        else if (norm === wanted || norm === wantedNorm) score = 3
+        else if (lower.startsWith(wanted) || wanted.startsWith(lower) || norm === wantedNorm) score = 2
+        else if (wantedNorm && (lower.startsWith(wantedNorm) || wantedNorm.startsWith(norm))) score = 1
+        else continue
+        if (e.isDirectory()) score += 10
+        if (score > bestScore) {
+            bestScore = score
+            best = { path: path.join(sharedPath, e.name), isDir: e.isDirectory() }
+        }
+    }
+    return best
+}
+
 async function handleOpenFileFolder(fileName) {
     logger.log('handleOpenFileFolder:', fileName)
 
@@ -960,16 +1011,13 @@ async function handleOpenFileFolder(fileName) {
     }
 
     try {
-        let stat = null
-        const target = fileName ? path.join(sharedPath, fileName) : null
-        if (target) {
-            try { stat = await fs.promises.stat(target) } catch (e) { /* 顶层没有这个文件 */ }
-        }
-        if (stat && stat.isDirectory()) {
-            const r = await shell.openPath(target)
+        const target = await findTopLevelTarget(sharedPath, fileName)
+        logger.log('open-file-folder target:', target ? target.path : '(sharedPath)')
+        if (target && target.isDir) {
+            const r = await shell.openPath(target.path)
             if (r) throw new Error(r)
-        } else if (stat) {
-            shell.showItemInFolder(target)
+        } else if (target) {
+            shell.showItemInFolder(target.path)
         } else {
             const r = await shell.openPath(sharedPath)
             if (r) throw new Error(r)
