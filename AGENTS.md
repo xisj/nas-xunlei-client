@@ -46,6 +46,10 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 ## 卡死修复历史
 - 点击"等待下载"任务左侧文件夹图标 → 整个应用卡死（100% 复现）。
   - 根因: `handleOpenFileFolder` → 递归扫描用**同步** `fs.readdirSync` 在 `sharedPath`（NAS 网络挂载）上扫 3 层。等待任务文件尚不存在 → 匹配落空 → 全量遍历整棵目录树，同步网络 I/O 直接阻塞主进程事件循环。
-  - **最终方案（v1.3.12）**: 不做递归扫描，但对 `sharedPath` 顶层做一次 `readdir`（15s 超时）按 精确 → 归一化精确（去 `.xltd` 等临时后缀/隐藏点前缀）→ 前缀 分级匹配，目录优先于文件——命中目录 `shell.openPath` 打开任务文件夹，命中文件 `shell.showItemInFolder` 选中，全落空才打开 `sharedPath` 兜底。v1.3.11 曾只精确 stat 顶层路径，任务名与磁盘名不一致时（改名/临时后缀/右键抓到错误 title）会退化成只开根目录。preload 右键文件名提取优先取 `.task-item` 内的 `.pan-list-item-name`，其次才向上找 `title` 属性。曾尝试过的深层递归扫描方案因 NAS 延迟和迅雷临时文件命名不可靠而放弃——永远不要恢复递归遍历 `sharedPath`。
+  - **最终方案（v1.3.13）**: `findTopLevelTarget` 最多扫**两层**（顶层 + 顶层各目录内一层，第二层 8 路并发 readdir），按 精确 → 归一化精确（去 `.xltd` 等临时后缀/隐藏点前缀）→ 前缀 分级匹配，目录优先于文件——命中目录 `shell.openPath` 打开任务文件夹，命中文件 `shell.showItemInFolder` 选中，全落空才打开 `sharedPath` 兜底。
+  - **必须扫两层的真实原因**: 同一用户的两份 config 可能不一致——dev 读 `src/config.json`（`sharedPath=/Volumes/迅雷/下载`），打包版读 `userData/config.json`（`sharedPath=/Volumes/迅雷`）。sharedPath 配成共享根目录时，文件实际在 `下载/` 子目录里，只扫顶层会退化成"打开挂载根目录"。dev 测试通过但打包版必现开错目录，两环境配置不同步是经典测试陷阱。
+  - **打分陷阱**: 重构匹配循环时 `bestScore` 必须从 0 起评（`score > bestScore`），从 -1 起会让 0 分的不匹配条目被误选（原实现靠 `continue` 跳过 0 分）。
+  - **速度窗口右键"打开文件夹"曾是死路**: `open-task-folder-from-speed-window` 原本只转发 `open-shared-path`（永远开根目录、丢掉任务名），已改为走 `open-file-folder` 正常匹配路径。
+  - preload 右键文件名提取优先取 `.task-item` 内的 `.pan-list-item-name`，其次才向上找 `title` 属性。曾尝试过的深层递归扫描方案因 NAS 延迟和迅雷临时文件命名不可靠而放弃——永远不要恢复递归遍历 `sharedPath`。
   - **原则**: 主进程中禁止对 `sharedPath`（或任何 `/Volumes/` 下可能为网络挂载的路径）使用同步 fs 调用（existsSync/readdirSync/statSync/readFileSync），一律 `fs.promises`；`open-shared-path`、速度球菜单"打开下载文件夹"的 existsSync 已是异步。
 - 文件夹图标显示门槛（preload `isTaskQualified`/`getTaskProgress`）：进度取**状态文本末尾的 `xx%`**（`.task-item__status` 或 `.pan-list-item-status` 里最后一个百分数）——`.td-progress-bar__inner` 的 `style.width` 恒为 100%（是轨道不是填充），不能用它。进度 ≥1% 或状态含"校验/验证"才显示图标；等待中但进度 ≥1% 的任务部分文件已落盘，仍可打开（曾按"等待"文本一刀切被否）。`mouseenter` 判定不合格时会主动恢复残留图标，防止列表复用 DOM 节点导致图标错挂。

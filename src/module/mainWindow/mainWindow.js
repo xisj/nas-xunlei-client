@@ -954,8 +954,23 @@ function normalizeEntryName(name) {
     return n
 }
 
-// 在 sharedPath 顶层条目里匹配 fileName，返回 {path, isDir} 或 null。
-// 目录优先于文件；精确 > 归一化精确 > 前缀。不匹配深层递归。
+// 在一组 Dirent 条目里给 fileName 打分，返回分数（0=不匹配）。
+// 目录优先于文件；精确 > 归一化精确 > 前缀。
+function scoreEntryMatch(e, wanted, wantedNorm) {
+    const lower = e.name.toLowerCase()
+    const norm = normalizeEntryName(e.name).toLowerCase()
+    let score = 0
+    if (lower === wanted) score = 4
+    else if (norm === wanted || norm === wantedNorm) score = 3
+    else if (lower.startsWith(wanted) || wanted.startsWith(lower) || norm === wantedNorm) score = 2
+    else if (wantedNorm && (lower.startsWith(wantedNorm) || wantedNorm.startsWith(norm))) score = 1
+    if (score > 0 && e.isDirectory()) score += 10
+    return score
+}
+
+// 在 sharedPath 下匹配 fileName，返回 {path, isDir} 或 null。
+// 只扫两层（顶层 + 顶层目录内一层）：覆盖"sharedPath 配的是共享根目录、
+// 实际文件在下一层子目录"的情况，不做更深的递归（NAS 上慢且不可靠）。
 async function findTopLevelTarget(sharedPath, fileName) {
     if (!fileName) return null
     const wanted = fileName.trim().toLowerCase()
@@ -971,21 +986,41 @@ async function findTopLevelTarget(sharedPath, fileName) {
         logger.log('readdir sharedPath failed:', e)
         return null
     }
-    let best = null, bestScore = -1
+    let best = null, bestScore = 0
     for (const e of entries) {
-        const lower = e.name.toLowerCase()
-        const norm = normalizeEntryName(e.name).toLowerCase()
-        let score = 0
-        if (lower === wanted) score = 4
-        else if (norm === wanted || norm === wantedNorm) score = 3
-        else if (lower.startsWith(wanted) || wanted.startsWith(lower) || norm === wantedNorm) score = 2
-        else if (wantedNorm && (lower.startsWith(wantedNorm) || wantedNorm.startsWith(norm))) score = 1
-        else continue
-        if (e.isDirectory()) score += 10
+        const score = scoreEntryMatch(e, wanted, wantedNorm)
         if (score > bestScore) {
             bestScore = score
             best = { path: path.join(sharedPath, e.name), isDir: e.isDirectory() }
         }
+    }
+    // 顶层未命中：对每个顶层目录再下探一层（并行，最多 8 路并发）
+    if (!best) {
+        const dirs = entries.filter(e => e.isDirectory())
+        for (let i = 0; i < dirs.length; i += 8) {
+            const batch = await Promise.all(dirs.slice(i, i + 8).map(async d => {
+                try {
+                    const sub = await fs.promises.readdir(path.join(sharedPath, d.name), { withFileTypes: true })
+                    let b = null, bs = 0
+                    for (const e of sub) {
+                        const score = scoreEntryMatch(e, wanted, wantedNorm)
+                        if (score > bs) { bs = score; b = { path: path.join(sharedPath, d.name, e.name), isDir: e.isDirectory(), score } }
+                    }
+                    return b
+                } catch (e) { return null }
+            }))
+            for (const b of batch) {
+                if (b && b.score > bestScore) {
+                    bestScore = b.score
+                    best = b
+                }
+            }
+        }
+    }
+    if (!best) {
+        // 诊断：匹配落空时列出顶层条目，便于对照任务名找出真实命名规则
+        logger.log('open-file-folder no match for:', fileName,
+            '| top-level entries:', entries.map(e => (e.isDirectory() ? '[d]' : '') + e.name).join(', '))
     }
     return best
 }
