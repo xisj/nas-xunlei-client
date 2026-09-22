@@ -53,3 +53,4 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
   - preload 右键文件名提取优先取 `.task-item` 内的 `.pan-list-item-name`，其次才向上找 `title` 属性。曾尝试过的深层递归扫描方案因 NAS 延迟和迅雷临时文件命名不可靠而放弃——永远不要恢复递归遍历 `sharedPath`。
   - **原则**: 主进程中禁止对 `sharedPath`（或任何 `/Volumes/` 下可能为网络挂载的路径）使用同步 fs 调用（existsSync/readdirSync/statSync/readFileSync），一律 `fs.promises`；`open-shared-path`、速度球菜单"打开下载文件夹"的 existsSync 已是异步。
 - 文件夹图标显示门槛（preload `isTaskQualified`/`getTaskProgress`）：进度取**状态文本末尾的 `xx%`**（`.task-item__status` 或 `.pan-list-item-status` 里最后一个百分数）——`.td-progress-bar__inner` 的 `style.width` 恒为 100%（是轨道不是填充），不能用它。进度 ≥1% 或状态含"校验/验证"才显示图标；等待中但进度 ≥1% 的任务部分文件已落盘，仍可打开（曾按"等待"文本一刀切被否）。`mouseenter` 判定不合格时会主动恢复残留图标，防止列表复用 DOM 节点导致图标错挂。
+- 速度球任务列表被清空（v1.3.14）：用户停留在"已完成"标签页时，页面轮询的 `drive/v1/tasks` 是带终态过滤的查询，响应里没有运行中任务 → `__taskMap` 的 `lastSeen` 超 5 分钟全部过期 → 列表清空。修复：`parseTasksAndReport` 接收请求 URL，URL 含 `COMPLETE|RECYCLE` 或"响应非空但全是终态任务"时跳过 lastSeen 过期清理；单条任务完成后的正常删除不受影响。

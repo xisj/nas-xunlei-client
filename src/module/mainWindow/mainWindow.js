@@ -1169,11 +1169,20 @@ function injectSpeedSniffer() {
                 return (bytes / 1024).toFixed(1) + 'K/s';
             }
 
-            function parseTasksAndReport(text) {
+            function parseTasksAndReport(text, url) {
                 try {
                     const data = JSON.parse(text);
                     if (!data || !Array.isArray(data.tasks)) return;
+                    // 判断该响应是否来自"已完成/回收站"等终态过滤查询：
+                    // 这类响应不含运行中任务，若照常做 lastSeen 过期清理，
+                    // 用户停留在"已完成"标签页时会把整个任务列表清空
+                    let isTerminalOnlyQuery = false;
+                    try {
+                        const decoded = decodeURIComponent(String(url || ''));
+                        isTerminalOnlyQuery = /COMPLETE|RECYCLE/i.test(decoded);
+                    } catch (_) {}
                     const now = Date.now();
+                    let hasRunningInResponse = false;
                     for (const t of data.tasks) {
                         const id = t.id;
                         if (!id) continue;
@@ -1195,6 +1204,7 @@ function injectSpeedSniffer() {
                             delete window.__taskMap[id];
                             continue;
                         }
+                        hasRunningInResponse = true;
                         // 速度累计（速度为0也保留，避免任务闪烁）
                         window.__taskSpeeds[id] = sp;
                         // 任务信息累计（按 id 维护，不完全覆盖，避免不同页面返回不同子集导致列表跳变）
@@ -1212,11 +1222,15 @@ function injectSpeedSniffer() {
                             }
                         };
                     }
-                    // 清理长时间未更新的任务（已删除/已完成但未在响应中体现）
-                    for (const k in window.__taskMap) {
-                        if (now - window.__taskMap[k].lastSeen > window.__taskStaleMs) {
-                            delete window.__taskMap[k];
-                            delete window.__taskSpeeds[k];
+                    // 清理长时间未更新的任务（已删除/已完成但未在响应中体现）。
+                    // 跳过条件：URL 显示是终态过滤查询，或响应非空但全是终态任务
+                    // —— 都说明这是"已完成/回收站"类标签页的数据，不代表运行中任务全集
+                    if (!isTerminalOnlyQuery && !(data.tasks.length > 0 && !hasRunningInResponse)) {
+                        for (const k in window.__taskMap) {
+                            if (now - window.__taskMap[k].lastSeen > window.__taskStaleMs) {
+                                delete window.__taskMap[k];
+                                delete window.__taskSpeeds[k];
+                            }
                         }
                     }
                     // 汇总速度
@@ -1257,7 +1271,7 @@ function injectSpeedSniffer() {
                     const url = (a[0] && a[0].url) ? a[0].url : a[0];
                     return of.apply(this, a).then((r) => {
                         try {
-                            if (isTasks(url)) r.clone().text().then(parseTasksAndReport).catch(() => {});
+                            if (isTasks(url)) r.clone().text().then(t => parseTasksAndReport(t, url)).catch(() => {});
                         } catch (e) {}
                         return r;
                     });
@@ -1276,7 +1290,7 @@ function injectSpeedSniffer() {
                             if (isTasks(this.__su)) {
                                 let t = '';
                                 try { t = (this.responseType === '' || this.responseType === 'text') ? this.responseText : JSON.stringify(this.response); } catch (_) {}
-                                parseTasksAndReport(t);
+                                parseTasksAndReport(t, this.__su);
                             }
                         } catch (e) {}
                     });
