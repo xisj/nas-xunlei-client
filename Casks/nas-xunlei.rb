@@ -1,13 +1,13 @@
 cask "nas-xunlei" do
-  version "1.3.13"
+  version "1.3.14"
 
   on_arm do
-    sha256 "15e5bc1c8883cd396a51d9f0931b0154495c6e1fd561768f6ac31776cd72daa5"
+    sha256 "f658b32e88e4956cfb8cad4131df4b74491eeadecf466b6263ddf4ff69769116"
 
     url "https://github.com/xisj/nas-xunlei-client/releases/download/v#{version}/nas-xunlei-#{version}-arm64.dmg"
   end
   on_intel do
-    sha256 "c4bd10b7c040acfa4e27093e5d226cb4a1d61f727662aad316737cbde18cf596"
+    sha256 "fc752a11ba79b638b4bee3ba8bad4eb597efaa34006f9f59efc134b1846b1e95"
 
     url "https://github.com/xisj/nas-xunlei-client/releases/download/v#{version}/nas-xunlei-#{version}-x64.dmg"
   end
