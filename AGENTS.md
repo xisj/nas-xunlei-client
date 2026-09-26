@@ -30,9 +30,10 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 
 ## 已知原生依赖
 - `node-window-manager@^2.2.4`: 用于检测前台全屏应用（视频/游戏），源码在 `node_modules/node-window-manager/lib/macos.mm` (macOS) / `windows.cc` (Windows)。
-  - **已打补丁**: `initWindow` 与 `getWindowTitle` 增加了空指针保护，防止长时间挂机后 macOS 回收后台进程导致 `NSRunningApplication` 为 nil 进而 `strlen(nullptr)` SIGSEGV。
-  - 重新安装/升级该依赖后需要重新打补丁并执行 `npx @electron/rebuild -f -w node-window-manager`。
-  - **重要**: 打补丁只改源码不够，必须重新编译生成 `.node`。`electron-builder` 打包时会调用 `@electron/rebuild`（`buildFromSource=false`），若 `build/Release/` 下已有旧版未打补丁的二进制缓存，可能不会重新编译。打补丁后务必先 `npx @electron/rebuild -f -w node-window-manager -a arm64`（及 `-a x64`）强制重建，再打包。可用 `otool -arch arm64 -tvV build/Release/addon.node | grep -A250 initWindow` 检查是否含 `cbz x23`（app 空检查）与 `csel`（UTF8String 空回退）确认补丁已编入。
+  - **补丁已持久化到仓库**: `patches/node-window-manager+2.2.4.patch`（patch-package 管理），内容为 `initWindow` 与 `getWindowTitle` 的空指针保护，防止长时间挂机后 macOS 回收后台进程导致 `NSRunningApplication` 为 nil 进而 `strlen(nullptr)` SIGSEGV。
+  - `package.json` 的 `postinstall` 会在本地 `npm install` 后自动应用补丁；CI 用 `npm ci --ignore-scripts` 跳过脚本，release.yml 中有独立 `npx patch-package` 步骤，在 electron-rebuild 之前执行。
+  - **升级该依赖版本后必须重新生成补丁**: 修改 `node_modules/node-window-manager` 源码后执行 `npx patch-package node-window-manager`，并检查生成的 patch 只含 `lib/macos.mm`（构建产物需手动从 patch 中剔除），再执行 `npx @electron/rebuild -f -w node-window-manager`。
+  - 可用 `otool -tvV <addon.node> | awk '/initWindow/,/ret/' | grep -c 'cbz\|csel'` 验证二进制是否含空检查指令（非 0 即已编入）。
 - `extract-file-icon`: 提取应用图标，同为 `.node` 原生模块。
 
 ## 崩溃修复历史
@@ -42,6 +43,9 @@ Electron 桌面客户端，封装 NAS 上的迅雷下载站。macOS/Windows 跨�
 - v1.3.3: 同一崩溃复现。源码 `macos.mm` 补丁仍在，但打包出的 arm64 `addon.node` 实际是**未打补丁的旧二进制**（`otool` 反汇编显示 `initWindow` 内 `bundleURL→path→UTF8String→Napi::String::New` 之间无任何 `cbz` 空检查，崩溃偏移 `initWindow+620` 正对应 `Napi::String::New` 调用点）。
   - 根因: 之前打补丁后未强制重建 arm64 原生模块，`electron-builder` 的 `@electron/rebuild(buildFromSource=false)` 沿用了 `build/Release/` 下未打补丁的缓存二进制。JS 层 `active.path` 保护无法拦截，因为崩溃发生在原生 `initWindow` 内部、早于返回值。
   - 修复: `npx @electron/rebuild -f -w node-window-manager -a arm64`（及 `extract-file-icon`）强制从已打补丁源码重新编译，再 `npm run dist:macarm` 重新打包。反汇编验证新二进制含 `cbz x23`(app nil 检查)、`cbz x0`(bundleURL/path nil 检查)、`csel x1,x23,x0,eq`(UTF8String nil 回退到 "")。
+- v1.3.15: 同一崩溃在 CI 发布版中第三次复现（挂机约 24h 后 `initWindow+620` → `strlen(nullptr)`）。
+  - 根因: 补丁此前只存在于本地 `node_modules`（gitignore 未入库）。CI 每次 `npm ci` 拉取 npm 原版未打补丁源码，`electron-rebuild -f` 重建出的 `addon.node` 依然带 bug——本地 `npm start` 正常但所有 CI 发布版都未修复。
+  - 修复: 引入 `patch-package` 将补丁提交为 `patches/node-window-manager+2.2.4.patch`；`package.json` 增加 `postinstall: patch-package`；release.yml 在 `npm ci --ignore-scripts` 后显式执行 `npx patch-package`，确保 CI 编译的是已打补丁源码。
 
 ## 卡死修复历史
 - 点击"等待下载"任务左侧文件夹图标 → 整个应用卡死（100% 复现）。

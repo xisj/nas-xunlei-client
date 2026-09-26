@@ -4,6 +4,7 @@
   "description": "",
   "main": "src/main.js",
   "scripts": {
+    "postinstall": "patch-package",
     "start": "electron .",
     "pc": "electron .",
     "build:ui2": "npm --prefix ui2 run build",
@@ -29,7 +30,8 @@
     "@electron/rebuild": "^3.7.0",
     "electron": "^25.0.0-beta.2",
     "electron-builder": "^26.15.3",
-    "electron-packager": "^17.1.1"
+    "electron-packager": "^17.1.1",
+    "patch-package": "^8.0.1"
   },
   "build": {
     "appId": "com.xisj.nas-xunlei",

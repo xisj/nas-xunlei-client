@@ -1,0 +1,34 @@
+diff --git a/node_modules/node-window-manager/lib/macos.mm b/node_modules/node-window-manager/lib/macos.mm
+index 038a7b9..f404274 100644
+--- a/node_modules/node-window-manager/lib/macos.mm
++++ b/node_modules/node-window-manager/lib/macos.mm
+@@ -174,7 +174,16 @@ Napi::Object initWindow(const Napi::CallbackInfo &info) {
+ 
+     auto obj = Napi::Object::New(env);
+     obj.Set("processId", [ownerPid intValue]);
+-    obj.Set("path", [app.bundleURL.path UTF8String]);
++    // Guard against stale PID after long idle/sleep: NSRunningApplication may
++    // return nil for a process that macOS has janked/terminated, in which case
++    // app.bundleURL.path is nil and [nil UTF8String] == nil, causing
++    // Napi::String::New(env, nullptr) -> strlen(nullptr) -> SIGSEGV.
++    const char *pathStr = "";
++    if (app && app.bundleURL && app.bundleURL.path) {
++      pathStr = [app.bundleURL.path UTF8String];
++      if (!pathStr) pathStr = "";
++    }
++    obj.Set("path", pathStr);
+ 
+     cacheWindow(handle, [ownerPid intValue]);
+ 
+@@ -193,7 +202,10 @@ Napi::String getWindowTitle(const Napi::CallbackInfo &info) {
+ 
+   if (wInfo) {
+     NSString *windowName = wInfo[(id)kCGWindowOwnerName];
+-    return Napi::String::New(env, [windowName UTF8String]);
++    // kCGWindowOwnerName may be absent or nil for stale window entries;
++    // [nil UTF8String] == nil would crash Napi::String::New.
++    const char *nameStr = windowName ? [windowName UTF8String] : nullptr;
++    return Napi::String::New(env, nameStr ? nameStr : "");
+   }
+ 
+   return Napi::String::New(env, "");

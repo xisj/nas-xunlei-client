@@ -66,6 +66,12 @@ jobs:
         # 原生模块由后续 electron-rebuild 步骤统一编译。
         run: npm ci --ignore-scripts
 
+      - name: Apply node_modules patches
+        # --ignore-scripts 跳过了 postinstall，需显式应用 patches/ 下的补丁
+        # （node-window-manager macos.mm 空指针保护），否则后续 electron-rebuild
+        # 会用未打补丁的源码编译出带崩溃 bug 的 addon.node。
+        run: npx patch-package
+
       - name: Install ui2 dependencies
         # ui2 是独立的子项目（有自己的 package.json），需要单独安装其 devDependencies
         # 否则 vite 找不到，build:ui2 会失败
